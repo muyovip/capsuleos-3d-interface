@@ -2,11 +2,11 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useEffect, useState } from 'react'
 
-function Capsule() {
+function Capsule({ position = [0, 0, 0], color = 'lime' }) {
   return (
-    <mesh position={[0, 0, 0]}>
+    <mesh position={position}>
       <sphereGeometry args={[1, 32, 32]} />
-      <meshBasicMaterial color="lime" wireframe />
+      <meshBasicMaterial color={color} wireframe />
     </mesh>
   )
 }
@@ -25,7 +25,7 @@ function App() {
       <OrbitControls />
       <ambientLight intensity={0.5} />
       <Capsule />
-      <Capsule position={[3, 0, 0]} />
+      {capsules > 1 && <Capsule position={[3, 0, 0]} color="orange" />}
     </Canvas>
   )
 }
