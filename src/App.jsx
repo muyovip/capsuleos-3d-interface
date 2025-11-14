@@ -1,25 +1,18 @@
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
-function Capsule({ position = [0, 0, 0], color = 'lime' }) {
+function Capsule() {
   return (
-    <mesh position={position}>
+    <mesh>
       <sphereGeometry args={[1, 32, 32]} />
-      <meshBasicMaterial color={color} wireframe />
+      <meshBasicMaterial color="lime" wireframe />
     </mesh>
   )
 }
 
-function App() {
-  const [capsules, setCapsules] = useState(0)
-
-  useEffect(() => {
-    fetch('/capsules/test-capsule.glyph')
-      .then(r => r.text())
-      .then(() => setCapsules(c => c + 1))
-      .catch(() => console.log('No .glyph found'))
-  }, [])
+export default function App() {
+  const [count, setCount] = useState(0)
 
   return (
     <>
@@ -30,16 +23,13 @@ function App() {
         fontFamily: 'monospace',
         pointerEvents: 'none'
       }}>
-        CapsuleOS Graph | Loaded: {capsules} | Click to spawn
+        CapsuleOS Graph | Loaded: {count} | Click to spawn
       </div>
       <Canvas camera={{ position: [0, 0, 5] }}>
         <OrbitControls />
         <ambientLight intensity={0.5} />
         <Capsule />
-        {capsules > 0 && <Capsule position={[3, 0, 0]} color="orange" />}
       </Canvas>
     </>
   )
 }
-
-export default App
