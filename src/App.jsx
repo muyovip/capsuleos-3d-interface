@@ -12,21 +12,33 @@ function Capsule({ position = [0, 0, 0], color = 'lime' }) {
 }
 
 function App() {
-  const [capsules, setCapsules] = useState(1)
+  const [capsules, setCapsules] = useState(0)
 
   useEffect(() => {
     fetch('/capsules/test-capsule.glyph')
       .then(r => r.text())
-      .then(text => setCapsules(c => c + 1))
+      .then(() => setCapsules(c => c + 1))
+      .catch(() => console.log('No .glyph found'))
   }, [])
 
   return (
-    <Canvas camera={{ position: [0, 0, 5] }}>
-      <OrbitControls />
-      <ambientLight intensity={0.5} />
-      <Capsule />
-      {capsules > 1 && <Capsule position={[3, 0, 0]} color="orange" />}
-    </Canvas>
+    <>
+      <div style={{
+        position: 'absolute',
+        top: 10, left: 10,
+        color: 'lime',
+        fontFamily: 'monospace',
+        pointerEvents: 'none'
+      }}>
+        CapsuleOS Graph | Loaded: {capsules} | Click to spawn
+      </div>
+      <Canvas camera={{ position: [0, 0, 5] }}>
+        <OrbitControls />
+        <ambientLight intensity={0.5} />
+        <Capsule />
+        {capsules > 0 && <Capsule position={[3, 0, 0]} color="orange" />}
+      </Canvas>
+    </>
   )
 }
 
