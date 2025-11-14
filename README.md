@@ -1,2 +1,7 @@
-# capsuleos-3d-interface
-3D planetary UI for CapsuleOS game capsules
+# CapsuleOS 3D Interface
+
+3D planetary visualization for game capsules.
+
+## Run
+npm install
+npm run dev
