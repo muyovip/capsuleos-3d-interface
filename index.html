@@ -1,56 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>CapsuleOS - 3D Graph Engine</title>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CapsuleOS 3D Graph</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
-    #info { position: absolute; top: 10px; left: 10px; color: #00ff88; font-family: monospace; z-index: 100; }
+    #root { width: 100vw; height: 100vh; }
   </style>
 </head>
 <body>
-  <div id="info">CapsuleOS Graph | Loaded: <span id="capsule-count">0</span> | Click to spawn</div>
-  <script>
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    // First Capsule - Green Orb
-    const geometry = new THREE.SphereGeometry(1, 32, 32);
-    const material = new THREE.MeshBasicMaterial({ color: 0x00ff88, wireframe: true });
-    const capsule = new THREE.Mesh(geometry, material);
-    scene.add(capsule);
-
-    camera.position.z = 5;
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-
-    function animate() {
-      requestAnimationFrame(animate);
-      capsule.rotation.y += 0.01;
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
-
-    // Load .glyph capsules from /capsules/
-    fetch('/capsules/test-capsule.glyph')
-      .then(r => r.text())
-      .then(text => {
-        console.log('Loaded capsule:', text);
-        document.getElementById('capsule-count').textContent = 1;
-        // Parse GΛLYPH → Spawn new planet (mock)
-        const newCapsule = capsule.clone();
-        newCapsule.position.x = 3;
-        newCapsule.material.color.setHex(0xff8800);
-        scene.add(newCapsule);
-      })
-      .catch(e => console.log('No capsule yet:', e));
-  </script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>
