@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls, Text } from '@react-three/drei'
 import { useState, useRef } from 'react'
@@ -9,7 +10,20 @@ function Capsule({ position, color = 'lime', label, onClick }) {
     mesh.current.rotation.x += delta * 0.5
     mesh.current.rotation.y += delta * 0.3
   })
-
+  
+useEffect(() => {
+  fetch('/glyphs/hello.glyph')
+    .then(r => r.json())
+    .then(glyph => {
+      setCapsules(c => [...c, { 
+        pos: glyph.position, 
+        color: glyph.color,
+        label: glyph.name,
+        onClick: () => alert(glyph.memory)
+      }])
+    })
+}, [])
+  
   return (
     <group position={position} onPointerDown={onClick}>
       <mesh ref={mesh}>
