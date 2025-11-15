@@ -1,5 +1,5 @@
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
+import { OrbitControls, Text } from '@react-three/drei'
 import { useState, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 
@@ -17,10 +17,15 @@ function Capsule({ position, color = 'lime', label, onClick }) {
         <meshBasicMaterial color={color} wireframe />
       </mesh>
       {label && (
-        <mesh position={[0, 1.5, 0]}>
-          <textGeometry args={[label, { font: 'helvetiker', size: 0.3, height: 0.01 }]} />
-          <meshBasicMaterial color="white" />
-        </mesh>
+        <Text
+          position={[0, 1.8, 0]}
+          fontSize={0.4}
+          color="white"
+          anchorX="center"
+          anchorY="middle"
+        >
+          {label}
+        </Text>
       )}
     </group>
   )
