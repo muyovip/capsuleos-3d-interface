@@ -11,7 +11,7 @@ function Capsule({ position, color = 'lime', label, onClick }) {
   })
 
   return (
-    <group position={position} onClick={onClick}>
+    <group position={position} onClick={onClick} onPointerDown={onClick}>
       <mesh ref={mesh}>
         <sphereGeometry args={[1, 32, 32]} />
         <meshBasicMaterial color={color} wireframe />
@@ -38,7 +38,8 @@ export default function App() {
     alert("Hello World! This capsule is alive.")
   }
 
-  const handleClick = (e) => {
+  const handleSpawn = (e) => {
+    e.stopPropagation()
     const { x, y, z } = e.point
     setCapsules(c => [...c, { pos: [x, y, z], color: 'orange' }])
   }
@@ -53,11 +54,12 @@ export default function App() {
         pointerEvents: 'none',
         fontSize: '14px'
       }}>
-        CapsuleOS Graph | Loaded: {capsules.length} | Click to spawn
+        CapsuleOS Graph | Loaded: {capsules.length} | Tap to spawn
       </div>
       <Canvas
         camera={{ position: [0, 0, 10], fov: 60 }}
-        onPointerDown={handleClick}
+        onPointerDown={handleSpawn}
+        onTouchStart={handleSpawn}
       >
         <OrbitControls enablePan={false} />
         <ambientLight intensity={0.6} />
@@ -69,6 +71,7 @@ export default function App() {
           color="cyan" 
           label="Hello World"
           onClick={spawnHello}
+          onPointerDown={spawnHello}
         />
         {/* Spawned Capsules */}
         {capsules.map((c, i) => (
