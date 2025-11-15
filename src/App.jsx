@@ -1,4 +1,4 @@
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls, Text } from '@react-three/drei'
 import { useState, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
@@ -11,7 +11,7 @@ function Capsule({ position, color = 'lime', label, onClick }) {
   })
 
   return (
-    <group position={position} onClick={onClick} onPointerDown={onClick}>
+    <group position={position} onPointerDown={onClick}>
       <mesh ref={mesh}>
         <sphereGeometry args={[1, 32, 32]} />
         <meshBasicMaterial color={color} wireframe />
@@ -31,6 +31,27 @@ function Capsule({ position, color = 'lime', label, onClick }) {
   )
 }
 
+// Background click handler
+function BackgroundSpawner({ onSpawn }) {
+  const { raycaster, mouse, camera, gl } = useThree()
+
+  const handleClick = (e) => {
+    e.stopPropagation()
+    const [x, y, z] = e.point.toArray()
+    onSpawn([x, y, z])
+  }
+
+  return (
+    <mesh
+      position={[0, 0, -5]}
+      onPointerDown={handleClick}
+    >
+      <planeGeometry args={[100, 100]} />
+      <meshBasicMaterial transparent opacity={0} />
+    </mesh>
+  )
+}
+
 export default function App() {
   const [capsules, setCapsules] = useState([])
 
@@ -38,10 +59,8 @@ export default function App() {
     alert("Hello World! This capsule is alive.")
   }
 
-  const handleSpawn = (e) => {
-    e.stopPropagation()
-    const { x, y, z } = e.point
-    setCapsules(c => [...c, { pos: [x, y, z], color: 'orange' }])
+  const handleSpawn = (pos) => {
+    setCapsules(c => [...c, { pos, color: 'orange' }])
   }
 
   return (
@@ -58,21 +77,25 @@ export default function App() {
       </div>
       <Canvas
         camera={{ position: [0, 0, 10], fov: 60 }}
-        onPointerDown={handleSpawn}
-        onTouchStart={handleSpawn}
+        gl={{ antialias: true }}
       >
         <OrbitControls enablePan={false} />
         <ambientLight intensity={0.6} />
+        
+        {/* Invisible background plane for spawning */}
+        <BackgroundSpawner onSpawn={handleSpawn} />
+
         {/* Default Capsule */}
         <Capsule position={[0, 0, 0]} />
+
         {/* Hello World Capsule */}
         <Capsule 
           position={[3, 0, 0]} 
           color="cyan" 
           label="Hello World"
           onClick={spawnHello}
-          onPointerDown={spawnHello}
         />
+
         {/* Spawned Capsules */}
         {capsules.map((c, i) => (
           <Capsule key={i} position={c.pos} color={c.color} />
