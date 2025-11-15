@@ -1,0 +1,8 @@
+{
+  "id": "hello-1",
+  "name": "Memory Capsule",
+  "position": [5, 2, -1],
+  "color": "magenta",
+  "memory": "User said: 'I can feel them!'",
+  "onClick": "alert(this.memory)"
+}
