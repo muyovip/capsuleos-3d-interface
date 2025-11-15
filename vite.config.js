@@ -3,8 +3,11 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/',
+  root: '.',           // ← FORCE VITE TO USE ROOT index.html
   build: {
-    outDir: 'dist'
+    outDir: 'dist',
+    rollupOptions: {
+      input: 'index.html' // ← EXPLICIT ENTRY
+    }
   }
 })
