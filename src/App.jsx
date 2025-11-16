@@ -1,4 +1,4 @@
-import { Canvas, useThree, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Line } from '@react-three/drei' 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
@@ -25,7 +25,6 @@ function createTextTexture(text, color, fontSize = 48) {
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   
-  // Set canvas size based on text length (simplified)
   canvas.width = 512;
   canvas.height = 128;
 
@@ -38,6 +37,32 @@ function createTextTexture(text, color, fontSize = 48) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
   return texture;
+}
+
+// Manifold Constraint Layer (The topological boundary)
+function ManifoldConstraintLayer() {
+  const meshRef = useRef();
+
+  useFrame((state, delta) => {
+    // Subtle, slow rotation for the boundary cage
+    if (meshRef.current) {
+      meshRef.current.rotation.y += delta * 0.01;
+      meshRef.current.rotation.x += delta * 0.005;
+    }
+  });
+
+  return (
+    <mesh ref={meshRef} position={[0, 0, 0]}>
+      {/* Using a Dodecahedron to suggest a higher-dimensional boundary structure */}
+      <dodecahedronGeometry args={[5.5, 0]} /> 
+      <meshBasicMaterial 
+        color="#00ffff" // Cyan/light blue for boundary
+        wireframe={true} 
+        transparent={true}
+        opacity={0.15} // Very subtle boundary
+      />
+    </mesh>
+  );
 }
 
 // 1. The GΛLYPH NODE Component (Uses Canvas Text Mesh)
@@ -60,9 +85,9 @@ function GlyphNode({ position, color, name, onClick }) {
         <meshBasicMaterial color={color} wireframe />
       </mesh>
       
-      {/* Text Mesh using Canvas Texture (Stable alternative to Drei/Text) */}
-      <mesh position={[0, 0.7, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[2.5, 0.6]} />
+      {/* Text Mesh using Canvas Texture (Fixed dimensions for longer text) */}
+      <mesh position={[0, 0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}> {/* Adjusted Y position to 0.8 */}
+        <planeGeometry args={[3.5, 0.8]} /> {/* Increased size to [3.5, 0.8] */}
         <meshBasicMaterial map={texture} transparent />
       </mesh>
     </group>
@@ -86,7 +111,7 @@ function BackgroundSpawner({ onSpawn }) {
   )
 }
 
-// 3. Main Application (The CapsuleOS Interface - Phase 7 Final Lock)
+// 3. Main Application (The CapsuleOS Interface - Phase 8 Final Deployment)
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
@@ -124,12 +149,11 @@ export default function App() {
     const newId = `spawn-${Date.now()}`
     const newNode = { 
       id: newId, 
-      name: `Spawned ${nodes.length + 1}`, // Updated name for newly spawned nodes
+      name: `Spawned ${nodes.length + 1}`,
       color: 'white', 
       position: pos 
     }
     
-    // Simple logic to link new node to a random existing node
     const existingNode = nodes[Math.floor(Math.random() * nodes.length)];
     const newConstraint = [newId, existingNode.id, 'white']; 
 
@@ -138,7 +162,7 @@ export default function App() {
   }, [nodes])
 
   return (
-    // FINAL CSS FIX: Use 100vw and dvh (Dynamic Viewport Height) for full mobile compatibility
+    // FINAL CSS FIX: Use 100vw and dvh for full mobile compatibility
     <div 
       className="w-screen bg-gray-950" 
       style={{ height: '100dvh' }} 
@@ -156,7 +180,7 @@ export default function App() {
       >
         CAPSULE OS | **DEX View** Operational
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: Final Fidelity Lock (Canvas Text)
+        <br/>Status: Final Fidelity Deployed.
       </div>
 
       {/* DEX View: 3D Computational Graph */}
@@ -183,13 +207,16 @@ export default function App() {
         <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
         <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
 
+        {/* --- Manifold Constraint Layer --- */}
+        <ManifoldConstraintLayer />
+
         {/* Render all GΛLYPH Nodes (Axiomatic and Spawned) */}
         {nodes.map(node => (
           <GlyphNode 
             key={node.id} 
             position={node.position} 
             color={node.color} 
-            name={node.name} // Pass name for text rendering
+            name={node.name}
             onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
           />
         ))}
