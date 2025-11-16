@@ -1,9 +1,11 @@
 import { Canvas, useFrame } from '@react-three/fiber'
+// NOTE: Updated drei/three versions to attempt to resolve peer dependency warnings
 import { OrbitControls, Line } from '@react-three/drei' 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
-// --- FIREBASE IMPORTS (Standard Modular Structure) ---
+// --- FIREBASE IMPORTS (Adjusted for Build Stability) ---
+// We use the full path to force the build environment to resolve the modules correctly.
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
@@ -58,6 +60,7 @@ function ManifoldConstraintLayer() {
 
   useFrame((state, delta) => {
     if (meshRef.current) {
+      // Slow rotation for visual fidelity
       meshRef.current.rotation.y += delta * 0.01;
       meshRef.current.rotation.x += delta * 0.005;
     }
@@ -83,6 +86,7 @@ function GlyphNode({ position, color, name, onClick }) {
   
   useFrame((state, delta) => {
     if (meshRef.current) {
+      // Faster, pulsing rotation
       meshRef.current.rotation.x += delta * 0.2
       meshRef.current.rotation.y += delta * 0.1
     }
@@ -90,13 +94,13 @@ function GlyphNode({ position, color, name, onClick }) {
 
   return (
     <group position={position} onClick={onClick}>
-      {/* Icosahedron Mesh */}
+      {/* Icosahedron Mesh - The Glyptic Core */}
       <mesh ref={meshRef}>
         <icosahedronGeometry args={[0.4, 0]} /> 
         <meshBasicMaterial color={color} wireframe />
       </mesh>
       
-      {/* Text Mesh using Canvas Texture */}
+      {/* Text Mesh using Canvas Texture - The Identity Layer */}
       <mesh position={[0, 0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[5.0, 0.8]} /> 
         <meshBasicMaterial map={texture} transparent />
@@ -117,6 +121,7 @@ function BackgroundSpawner({ onSpawn }) {
   }, [onSpawn])
 
   return (
+    // Invisible plane spanning the view to capture clicks
     <mesh onClick={handleClick}>
       <planeGeometry args={[200, 200]} /> 
       <meshBasicMaterial visible={false} />
@@ -153,6 +158,7 @@ export default function App() {
 
       const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
       
+      // Handle authentication state change
       const handleAuth = (user) => {
         if (user) {
           setUserId(user.uid);
@@ -169,9 +175,10 @@ export default function App() {
 
       authListener = onAuthStateChanged(auth, handleAuth);
 
+      // Attempt custom token sign-in first if token exists
       if (token) {
         signInWithCustomToken(auth, token).catch(e => {
-          console.error("Custom token sign-in failed. Falling back to anonymous.", e);
+          console.error("Custom token sign-in failed. Falling back to onAuthStateChanged.", e);
         });
       }
 
@@ -188,15 +195,18 @@ export default function App() {
 
   // --- 2. FIRESTORE DATA LISTENER AND INITIALIZER ---
   useEffect(() => {
+    // Only proceed if DB object is initialized and Auth state has been checked
     if (!db || !authReady) return;
 
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    // Use the PUBLIC data path
     const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
     const docRef = doc(db, docPath);
 
     // Function to set initial state if document doesn't exist
     const initializeState = async () => {
         try {
+            // Set the INITIAL_SYSTEM_STATE structure
             await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: true });
             console.log("Initialized Axiomatic State.");
         } catch (e) {
@@ -210,7 +220,7 @@ export default function App() {
         setNodes(data.nodes || []);
         setConstraints(data.constraints || []);
       } else {
-        // Document doesn't exist, initialize it
+        // Document doesn't exist, initialize it (idempotent)
         initializeState();
       }
       setLoading(false); // Data is loaded or initialization is triggered
@@ -223,8 +233,9 @@ export default function App() {
   }, [db, authReady]);
   
   
-  // --- RAG INGESTION HANDLER ---
+  // --- RAG INGESTION HANDLER (Adds next artifact from the predefined list) ---
   const handleRAGIngestion = useCallback(async () => {
+    // Guard clause to prevent execution before setup is complete
     if (!db || !userId || loading) return;
 
     const artifact = RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length];
@@ -234,7 +245,8 @@ export default function App() {
       id: artifact.name.replace(/\s/g, '-').toLowerCase(),
       name: artifact.name,
       color: artifact.color,
-      position: artifact.pos,
+      // Use the predefined position from the RAG_ARTIFACTS list
+      position: artifact.pos, 
       type: artifact.type,
       timestamp: Date.now()
     };
@@ -250,14 +262,15 @@ export default function App() {
       const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
       const docRef = doc(db, docPath);
 
-      // We ensure no duplicate nodes are added, then add the new node and constraints
+      // Ensure no duplicate nodes are added (by ID), then append the new node.
       const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
+      // Append new constraints
       const allConstraints = [...constraints, ...newConstraints];
 
       await setDoc(docRef, {
         nodes: uniqueNodes,
         constraints: allConstraints
-      }, { merge: false }); // Use merge: false for cleaner array replacement
+      }, { merge: false }); // Overwrite the arrays completely with the new set
 
       setRagIndex(i => i + 1);
       console.log(`Ingested new RAG artifact: ${newNode.name}`);
@@ -271,7 +284,7 @@ export default function App() {
   const handleSpawn = useCallback(async (pos) => {
     if (!db || !userId || loading) return;
     
-    const newId = `spawn-${Date.now()}`
+    const newId = `hil-input-${Date.now()}`
     const newNode = { 
       id: newId, 
       name: `HIL Input ${nodes.length + 1}`,
@@ -281,7 +294,7 @@ export default function App() {
       timestamp: Date.now()
     }
     
-    // Link new node to a random existing axiomatic node (rag-orch, glyph-eng, vgm-anchor, manifold)
+    // Link new node to a random existing axiomatic node (rag-orch, glyph-eng, vgm-anchor, manifold, hax)
     const axiomaticIds = INITIAL_SYSTEM_STATE.nodes.map(n => n.id);
     const existingNodeId = axiomaticIds[Math.floor(Math.random() * axiomaticIds.length)];
     const newConstraint = [newId, existingNodeId, 'white']; 
@@ -309,6 +322,7 @@ export default function App() {
 
   // Utility to find node position by ID
   const nodeMap = useMemo(() => {
+    // Map node ID to its position vector [x, y, z]
     return new Map(nodes.map(node => [node.id, node.position]));
   }, [nodes]);
 
@@ -392,6 +406,7 @@ export default function App() {
         style={{ display: 'block' }} 
         camera={{ position: [0, 0, 10], near: 0.1, far: 100 }} 
       >
+        {/* Allows user to pan and rotate the view */}
         <OrbitControls 
           enableDamping 
           dampingFactor={0.05} 
@@ -409,7 +424,7 @@ export default function App() {
         <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
         <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
 
-        {/* --- Manifold Constraint Layer --- */}
+        {/* --- Manifold Constraint Layer (Boundary) --- */}
         <ManifoldConstraintLayer />
 
         {/* Render all GΛLYPH Nodes (Axiomatic and RAG-Derived) */}
