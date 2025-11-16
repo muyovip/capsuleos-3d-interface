@@ -23,7 +23,7 @@ const INITIAL_AXIOMATIC_CONSTRAINTS = [
 // 1. The GΛLYPH NODE Component
 function GlyphNode({ position, color, label, onClick }) {
   const meshRef = useRef()
-  // Rotation applied via useFrame, standard Three.js practice
+  
   useFrame((state, delta) => {
     if (meshRef.current) {
       meshRef.current.rotation.x += delta * 0.2
@@ -34,7 +34,6 @@ function GlyphNode({ position, color, label, onClick }) {
   return (
     <group position={position} onClick={onClick}>
       <mesh ref={meshRef}>
-        {/* Icosahedron (20-sided) for complex, high-poly node visualization */}
         <icosahedronGeometry args={[0.4, 0]} /> 
         <meshBasicMaterial color={color} wireframe />
       </mesh>
@@ -45,8 +44,7 @@ function GlyphNode({ position, color, label, onClick }) {
           color={color} 
           anchorX="center" 
           anchorY="middle"
-          // Disable depth test so text always appears visible over the mesh
-          material-depthTest={false} 
+          // Removed material-depthTest={false} for stability
         >
           {label}
         </Text>
@@ -74,14 +72,14 @@ function LatticeConstraintRenderer({ nodes, constraints }) {
         const startPos = nodeMap[constraint.startId]
         const endPos = nodeMap[constraint.endId]
         
+        // Explicitly check for both points to ensure a valid line geometry is built
         if (startPos && endPos) {
-          // The <Line> component from drei draws a robust line segment
           return (
             <Line
-              key={index} // Use a unique key for list stability
+              key={index}
               points={[startPos, endPos]} 
               color={constraint.color || 'white'}
-              lineWidth={1.5} // Slightly thicker lines for visibility
+              lineWidth={1.5}
               opacity={0.8}
             />
           )
@@ -115,7 +113,7 @@ export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
 
-  // Load initial data on mount (Robustness Fix)
+  // Load initial data on mount (Ensures data is present after component initializes)
   useEffect(() => {
     setNodes(INITIAL_AXIOMATIC_NODES);
     setConstraints(INITIAL_AXIOMATIC_CONSTRAINTS);
@@ -164,7 +162,7 @@ export default function App() {
       {/* DEX View: 3D Computational Graph */}
       <Canvas 
         style={{ width: '100%', height: '100%' }}
-        camera={{ position: [0, 0, 12] }} // Pull camera back slightly for full view
+        camera={{ position: [0, 0, 15] }} // Adjusted camera position for stability
       >
         {/* HIL Control: OrbitControls allows for deterministic auditing of the graph */}
         <OrbitControls enableDamping dampingFactor={0.05} />
