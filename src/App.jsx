@@ -13,11 +13,9 @@ const INITIAL_AXIOMATIC_NODES = [
   { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [3, -0.5, -0.5] },
 ];
 
-// Constraints array remains empty for this phase
 const INITIAL_AXIOMATIC_CONSTRAINTS = []; 
 
-
-// 1. The GΛLYPH NODE Component (Still omitting Text for stability)
+// 1. The GΛLYPH NODE Component
 function GlyphNode({ position, color, onClick }) {
   const meshRef = useRef()
   
@@ -51,14 +49,13 @@ function BackgroundSpawner({ onSpawn }) {
   // A large, transparent mesh that covers the background to capture clicks
   return (
     <mesh onClick={handleClick}>
-      {/* Use a much larger plane to ensure it covers the entire view regardless of zoom/aspect ratio */}
       <planeGeometry args={[200, 200]} /> 
       <meshBasicMaterial visible={false} />
     </mesh>
   )
 }
 
-// 3. Main Application (The CapsuleOS Interface - Phase 3 Fix)
+// 3. Main Application (The CapsuleOS Interface - Phase 4 Mobile Fix)
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
@@ -85,36 +82,45 @@ export default function App() {
   }, [])
 
   return (
-    // Ensure the container fills the screen
-    <div className="w-full h-screen bg-gray-950"> 
+    // CRITICAL: Ensure the container is guaranteed to fill the viewport
+    <div className="w-screen h-screen bg-gray-950"> 
       {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
       <div 
+        className="absolute top-5 left-5 z-10 p-3 rounded-xl"
         style={{
-          position: 'absolute',
-          top: '20px', left: '20px',
           color: 'lime',
           fontFamily: 'monospace',
-          zIndex: 10,
           background: 'rgba(0, 0, 0, 0.5)',
-          padding: '8px 12px',
-          borderRadius: '8px',
           fontSize: '14px',
           boxShadow: '0 0 10px rgba(50, 255, 50, 0.5)'
         }}
       >
-        CAPSULE OS | **DEX View** Operational (Phase 3 Test)
+        CAPSULE OS | **DEX View** Operational (Phase 4 Test)
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: Display Fidelity Locked
+        <br/>Status: Mobile Fidelity Locked
       </div>
 
       {/* DEX View: 3D Computational Graph */}
       <Canvas 
-        // Explicitly force the canvas to fill the parent container
-        style={{ width: '100%', height: '100%', display: 'block' }} 
-        camera={{ position: [0, 0, 10] }} // Moved camera closer for better view of nodes
+        // CRITICAL: Ensure the canvas itself fills the container
+        className="w-full h-full"
+        style={{ display: 'block' }} 
+        // Explicitly set clipping planes to stabilize zoom
+        camera={{ position: [0, 0, 10], near: 0.1, far: 100 }} 
       >
         {/* HIL Control: OrbitControls */}
-        <OrbitControls enableDamping dampingFactor={0.05} />
+        <OrbitControls 
+          enableDamping 
+          dampingFactor={0.05} 
+          minDistance={3} // Prevents zooming too close to nodes
+          maxDistance={30} // Prevents zooming too far away
+          // Ensure touch controls are properly configured for mobile
+          touches={{
+            ONE: THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY,
+            THREE: THREE.TOUCH.PAN,
+          }}
+        />
         
         {/* Holographic Lighting */}
         <ambientLight intensity={0.5} color="cyan" />
