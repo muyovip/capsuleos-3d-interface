@@ -21,12 +21,13 @@ const INITIAL_AXIOMATIC_CONSTRAINTS = [
 ]; 
 
 // Helper function to create a texture with text on it
-function createTextTexture(text, color, fontSize = 48) {
+function createTextTexture(text, color, fontSize = 64) { // Increased font size slightly to match larger plane
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   
-  canvas.width = 512;
-  canvas.height = 128;
+  // FIX: Increased canvas width to 1024 for better horizontal padding
+  canvas.width = 1024; 
+  canvas.height = 128; // Height remains sufficient
 
   context.font = `Bold ${fontSize}px monospace`;
   context.fillStyle = color;
@@ -86,8 +87,9 @@ function GlyphNode({ position, color, name, onClick }) {
       </mesh>
       
       {/* Text Mesh using Canvas Texture (Fixed dimensions for longer text) */}
-      <mesh position={[0, 0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}> {/* Adjusted Y position to 0.8 */}
-        <planeGeometry args={[3.5, 0.8]} /> {/* Increased size to [3.5, 0.8] */}
+      <mesh position={[0, 0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        {/* FIX: Increased plane width to 4.5 for more room */}
+        <planeGeometry args={[4.5, 0.8]} /> 
         <meshBasicMaterial map={texture} transparent />
       </mesh>
     </group>
@@ -111,7 +113,7 @@ function BackgroundSpawner({ onSpawn }) {
   )
 }
 
-// 3. Main Application (The CapsuleOS Interface - Phase 8 Final Deployment)
+// 3. Main Application (The CapsuleOS Interface - Phase 9 Full Text Fidelity)
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
@@ -180,7 +182,7 @@ export default function App() {
       >
         CAPSULE OS | **DEX View** Operational
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: Final Fidelity Deployed.
+        <br/>Status: Text Fidelity Locked.
       </div>
 
       {/* DEX View: 3D Computational Graph */}
