@@ -1,7 +1,6 @@
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Line } from '@react-three/drei' 
-// We import 'Component' explicitly for the ErrorBoundary pattern
-import React, { useState, useRef, useEffect, useCallback, useMemo, Component } from 'react' 
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
 // --- FIREBASE IMPORTS ---
@@ -13,53 +12,7 @@ import { setLogLevel } from 'firebase/firestore';
 // Enable Firestore debug logging
 setLogLevel('debug');
 
-// --- R3F ERROR BOUNDARY ---
-// This component will catch crashes inside the Canvas and display an error.
-class R3FErrorBoundary extends Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    // Log the error for local console debugging
-    console.error("R3F Component Error Caught:", error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      // Fallback UI to replace the blank screen
-      return (
-        <div 
-          className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-red-950/90 text-red-300 font-mono p-10"
-          style={{ height: '100dvh', backdropFilter: 'blur(5px)' }}
-        >
-          <h1 className="text-xl font-bold text-yellow-400">CRITICAL KERNEL ERROR (WebGL/Dependency)</h1>
-          <p className="mt-4 text-center text-sm">
-            A fatal rendering error occurred inside the 3D view. 
-            This often indicates a **dependency conflict** (like the `three-mesh-bvh` warning) or WebGL failure on this device.
-          </p>
-          <pre className="mt-4 p-3 bg-red-800/50 rounded text-xs overflow-auto max-w-full">
-            {this.state.error ? this.state.error.toString() : "Unknown Error - Check Console Logs"}
-          </pre>
-          <p className="mt-4 text-xs text-lime-400">
-            **Action Required:** Please run `npm update` or manually update your `three-mesh-bvh` dependency and redeploy.
-          </p>
-        </div>
-      );
-    }
-
-    return this.props.children; 
-  }
-}
-// --- END R3F ERROR BOUNDARY ---
-
-
-// --- AXIOMATIC DATA (NO CHANGE) ---
+// --- AXIOMATIC DATA ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
     { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0] },
@@ -77,7 +30,7 @@ const INITIAL_SYSTEM_STATE = {
   ],
 };
 
-// --- RAG INGESTION ARTIFACTS (NO CHANGE) ---
+// --- RAG INGESTION ARTIFACTS ---
 const RAG_ARTIFACTS = [
     { name: "Regenesis Dystopia", color: "red", type: "RAG-Synthesis", pos: [-3, -4, 2], links: ['rag-orch', 'glyph-eng'] },
     { name: "QLM-NFT Protocol", color: "purple", type: "VGM-Output", pos: [4, 3, -1], links: ['vgm-anchor', 'hax'] },
@@ -536,62 +489,60 @@ export default function App() {
 
 
       {/* DEX View: 3D Computational Graph */}
-      <R3FErrorBoundary> 
-        <Canvas 
-          className="w-full h-full"
-          style={{ display: 'block' }} 
-          camera={{ position: [0, 0, 10], near: 0.1, far: 100 }} 
-        >
-          {/* Allows user to pan and rotate the view */}
-          <OrbitControls 
-            enableDamping 
-            dampingFactor={0.05} 
-            minDistance={5} 
-            maxDistance={30} 
-            touches={{
-              ONE: THREE.TOUCH.ROTATE,
-              TWO: THREE.TOUCH.DOLLY,
-              THREE: THREE.TOUCH.PAN,
-            }}
+      <Canvas 
+        className="w-full h-full"
+        style={{ display: 'block' }} 
+        camera={{ position: [0, 0, 10], near: 0.1, far: 100 }} 
+      >
+        {/* Allows user to pan and rotate the view */}
+        <OrbitControls 
+          enableDamping 
+          dampingFactor={0.05} 
+          minDistance={5} 
+          maxDistance={30} 
+          touches={{
+            ONE: THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY,
+            THREE: THREE.TOUCH.PAN,
+          }}
+        />
+        
+        {/* Holographic Lighting */}
+        <ambientLight intensity={0.5} color="cyan" />
+        <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
+        <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
+
+        {/* --- Manifold Constraint Layer (Boundary) --- */}
+        <ManifoldConstraintLayer />
+
+        {/* Render all GΛLYPH Nodes (Axiomatic and RAG-Derived) */}
+        {nodes.map(node => (
+          <GlyphNode 
+            key={node.id} 
+            id={node.id} // Pass ID for selection
+            position={node.position} 
+            color={node.color} 
+            name={node.name}
+            isSelected={selectedNodeIds.has(node.id)} // Pass selection status
+            onSelect={handleNodeSelect} // Pass selection handler
           />
-          
-          {/* Holographic Lighting */}
-          <ambientLight intensity={0.5} color="cyan" />
-          <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
-          <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
+        ))}
 
-          {/* --- Manifold Constraint Layer (Boundary) --- */}
-          <ManifoldConstraintLayer />
+        {/* Render Lattice Constraints (Wires) */}
+        {linePoints.map(({ points, color }, index) => (
+          <Line
+            key={index}
+            points={points}
+            color={color} 
+            lineWidth={2}
+            dashed={false}
+          />
+        ))}
+        
+        {/* HIL Input Spawner (Click on background to spawn a new HIL node) */}
+        <BackgroundSpawner onSpawn={handleSpawn} />
 
-          {/* Render all GΛLYPH Nodes (Axiomatic and RAG-Derived) */}
-          {nodes.map(node => (
-            <GlyphNode 
-              key={node.id} 
-              id={node.id} // Pass ID for selection
-              position={node.position} 
-              color={node.color} 
-              name={node.name}
-              isSelected={selectedNodeIds.has(node.id)} // Pass selection status
-              onSelect={handleNodeSelect} // Pass selection handler
-            />
-          ))}
-
-          {/* Render Lattice Constraints (Wires) */}
-          {linePoints.map(({ points, color }, index) => (
-            <Line
-              key={index}
-              points={points}
-              color={color} 
-              lineWidth={2}
-              dashed={false}
-            />
-          ))}
-          
-          {/* HIL Input Spawner (Click on background to spawn a new HIL node) */}
-          <BackgroundSpawner onSpawn={handleSpawn} />
-
-        </Canvas>
-      </R3FErrorBoundary>
+      </Canvas>
     </div>
   )
 }
