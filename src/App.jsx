@@ -4,15 +4,20 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import * as THREE from 'three'
 
 // --- Axiomatic Data Initialization ---
+// Slightly adjusted positions to bring the cluster closer to the center of the frame
 const INITIAL_AXIOMATIC_NODES = [
-  { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.5, 1.5, 0] },
-  { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.5, 1.5, 0] },
-  { id: 'vgm-anchor', name: 'VGM Anchor', color: 'cyan', position: [0, 3, -2] },
-  { id: 'manifold', name: 'Manifold Constraint', color: 'lime', position: [0, -3, 2] },
-  { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [4, -1, -1] },
+  { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0] },
+  { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.0, 1.0, 0] },
+  { id: 'vgm-anchor', name: 'VGM Anchor', color: 'cyan', position: [0, 2.5, -1.5] },
+  { id: 'manifold', name: 'Manifold Constraint', color: 'lime', position: [0, -2.5, 1.5] },
+  { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [3, -0.5, -0.5] },
 ];
 
-// 1. The GΛLYPH NODE Component (Labels omitted for stability)
+// Constraints array remains empty for this phase
+const INITIAL_AXIOMATIC_CONSTRAINTS = []; 
+
+
+// 1. The GΛLYPH NODE Component (Still omitting Text for stability)
 function GlyphNode({ position, color, onClick }) {
   const meshRef = useRef()
   
@@ -29,7 +34,7 @@ function GlyphNode({ position, color, onClick }) {
         <icosahedronGeometry args={[0.4, 0]} /> 
         <meshBasicMaterial color={color} wireframe />
       </mesh>
-      {/* <Text> component omitted for immediate stability test */}
+      {/* Text component omitted for stability test */}
     </group>
   )
 }
@@ -46,13 +51,14 @@ function BackgroundSpawner({ onSpawn }) {
   // A large, transparent mesh that covers the background to capture clicks
   return (
     <mesh onClick={handleClick}>
-      <planeGeometry args={[100, 100]} />
+      {/* Use a much larger plane to ensure it covers the entire view regardless of zoom/aspect ratio */}
+      <planeGeometry args={[200, 200]} /> 
       <meshBasicMaterial visible={false} />
     </mesh>
   )
 }
 
-// 3. Main Application (The CapsuleOS Interface - Phase 2 Test)
+// 3. Main Application (The CapsuleOS Interface - Phase 3 Fix)
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
@@ -60,7 +66,7 @@ export default function App() {
   // Load initial data on mount
   useEffect(() => {
     setNodes(INITIAL_AXIOMATIC_NODES);
-    // Constraints array is empty for this test
+    setConstraints(INITIAL_AXIOMATIC_CONSTRAINTS);
   }, []);
 
 
@@ -79,7 +85,7 @@ export default function App() {
   }, [])
 
   return (
-    // Set a dark, full-screen background for the holographic effect
+    // Ensure the container fills the screen
     <div className="w-full h-screen bg-gray-950"> 
       {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
       <div 
@@ -96,15 +102,16 @@ export default function App() {
           boxShadow: '0 0 10px rgba(50, 255, 50, 0.5)'
         }}
       >
-        CAPSULE OS | **DEX View** Operational (Phase 2 Test)
+        CAPSULE OS | **DEX View** Operational (Phase 3 Test)
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: Controls and Node Stability Test
+        <br/>Status: Display Fidelity Locked
       </div>
 
       {/* DEX View: 3D Computational Graph */}
       <Canvas 
-        style={{ width: '100%', height: '100%' }}
-        camera={{ position: [0, 0, 15] }}
+        // Explicitly force the canvas to fill the parent container
+        style={{ width: '100%', height: '100%', display: 'block' }} 
+        camera={{ position: [0, 0, 10] }} // Moved camera closer for better view of nodes
       >
         {/* HIL Control: OrbitControls */}
         <OrbitControls enableDamping dampingFactor={0.05} />
@@ -120,7 +127,7 @@ export default function App() {
             key={node.id} 
             position={node.position} 
             color={node.color} 
-            onClick={() => console.log(`Node ${node.name} activated.`)}
+            onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
           />
         ))}
 
