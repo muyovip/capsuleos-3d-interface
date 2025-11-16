@@ -1,41 +1,40 @@
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls, Text, Line } from '@react-three/drei'
-import { useState, useRef, useMemo, useEffect } from 'react'
+import { useState, useRef, useMemo, useEffect, useCallback } from 'react'
 import * as THREE from 'three'
 
-// The initial set of Axiomatic Nodes (Core GΛLYPH components)
-const AXIOMATIC_NODES = [
+// --- Axiomatic Data Initialization ---
+const INITIAL_AXIOMATIC_NODES = [
   { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.5, 1.5, 0] },
   { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.5, 1.5, 0] },
   { id: 'vgm-anchor', name: 'VGM Anchor', color: 'cyan', position: [0, 3, -2] },
   { id: 'manifold', name: 'Manifold Constraint', color: 'lime', position: [0, -3, 2] },
   { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [4, -1, -1] },
-]
+];
 
-// The initial Deterministic Connections (Lattice Constraints)
-const AXIOMATIC_CONSTRAINTS = [
+const INITIAL_AXIOMATIC_CONSTRAINTS = [
   { startId: 'rag-orch', endId: 'glyph-eng', color: 'cyan' },
   { startId: 'glyph-eng', endId: 'vgm-anchor', color: 'lime' },
   { startId: 'vgm-anchor', endId: 'manifold', color: 'cyan' },
   { startId: 'manifold', endId: 'rag-orch', color: 'lime' },
   { startId: 'glyph-eng', endId: 'hax', color: 'orange' },
-]
+];
 
-// 1. The GΛLYPH NODE Component (Our Capsule)
+// 1. The GΛLYPH NODE Component
 function GlyphNode({ position, color, label, onClick }) {
   const meshRef = useRef()
+  // Rotation applied via useFrame, standard Three.js practice
   useFrame((state, delta) => {
-    // Subtle rotation to simulate an active, 'alive' tensor
     if (meshRef.current) {
       meshRef.current.rotation.x += delta * 0.2
       meshRef.current.rotation.y += delta * 0.1
     }
   })
 
-  // We are using an Icosahedron (20-sided) to approximate the complex Glyph shape
   return (
     <group position={position} onClick={onClick}>
       <mesh ref={meshRef}>
+        {/* Icosahedron (20-sided) for complex, high-poly node visualization */}
         <icosahedronGeometry args={[0.4, 0]} /> 
         <meshBasicMaterial color={color} wireframe />
       </mesh>
@@ -46,6 +45,8 @@ function GlyphNode({ position, color, label, onClick }) {
           color={color} 
           anchorX="center" 
           anchorY="middle"
+          // Disable depth test so text always appears visible over the mesh
+          material-depthTest={false} 
         >
           {label}
         </Text>
@@ -65,22 +66,6 @@ function LatticeConstraintRenderer({ nodes, constraints }) {
     }, {})
   }, [nodes])
 
-  // Calculate and memoize the line points array
-  const linePoints = useMemo(() => {
-    const points = []
-    constraints.forEach(constraint => {
-      const startPos = nodeMap[constraint.startId]
-      const endPos = nodeMap[constraint.endId]
-      
-      if (startPos && endPos) {
-        // Create a start point vector
-        points.push(new THREE.Vector3(...startPos))
-        // Create an end point vector
-        points.push(new THREE.Vector3(...endPos))
-      }
-    })
-    return points
-  }, [constraints, nodeMap])
 
   // Render the lines connecting the nodes
   return (
@@ -90,16 +75,14 @@ function LatticeConstraintRenderer({ nodes, constraints }) {
         const endPos = nodeMap[constraint.endId]
         
         if (startPos && endPos) {
-          // The <Line> component draws a line between two or more points
+          // The <Line> component from drei draws a robust line segment
           return (
             <Line
-              key={index}
-              points={[startPos, endPos]} // Expects array of [x,y,z] arrays
+              key={index} // Use a unique key for list stability
+              points={[startPos, endPos]} 
               color={constraint.color || 'white'}
-              lineWidth={1}
-              opacity={0.7}
-              // Optional: Add a subtle dash effect for a futuristic feel
-              dashed={false}
+              lineWidth={1.5} // Slightly thicker lines for visibility
+              opacity={0.8}
             />
           )
         }
@@ -111,15 +94,12 @@ function LatticeConstraintRenderer({ nodes, constraints }) {
 
 // 3. Background Click Handler for Spawning (HIL Input)
 function BackgroundSpawner({ onSpawn }) {
-  const handleClick = (e) => {
-    // Stop propagation to prevent canvas events from firing multiple times
+  const handleClick = useCallback((e) => {
     e.stopPropagation() 
-    // Ensure we have a point in 3D space from the raycaster intersection
     if (e.point) {
-      const [x, y, z] = e.point.toArray()
-      onSpawn([x, y, z])
+      onSpawn(e.point.toArray())
     }
-  }
+  }, [onSpawn])
 
   // A large, transparent mesh that covers the background to capture clicks
   return (
@@ -130,12 +110,19 @@ function BackgroundSpawner({ onSpawn }) {
   )
 }
 
-// 4. Main Application
+// 4. Main Application (The CapsuleOS Interface)
 export default function App() {
-  const [nodes, setNodes] = useState(AXIOMATIC_NODES)
-  const [constraints, setConstraints] = useState(AXIOMATIC_CONSTRAINTS)
+  const [nodes, setNodes] = useState([])
+  const [constraints, setConstraints] = useState([])
 
-  const handleSpawn = (pos) => {
+  // Load initial data on mount (Robustness Fix)
+  useEffect(() => {
+    setNodes(INITIAL_AXIOMATIC_NODES);
+    setConstraints(INITIAL_AXIOMATIC_CONSTRAINTS);
+  }, []);
+
+
+  const handleSpawn = useCallback((pos) => {
     const newId = `spawn-${Date.now()}`
     const newNode = { 
       id: newId, 
@@ -149,10 +136,11 @@ export default function App() {
     
     // Axiomatic Rule: Automatically connect the new node to the Manifold Constraint
     setConstraints(c => [...c, { startId: 'manifold', endId: newId, color: 'orange' }])
-  }
+  }, [])
 
   return (
-    <div className="w-full h-screen bg-gray-950">
+    // Set a dark, full-screen background for the holographic effect (CEX View container)
+    <div className="w-full h-screen bg-gray-950"> 
       {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
       <div 
         style={{
@@ -176,12 +164,16 @@ export default function App() {
       {/* DEX View: 3D Computational Graph */}
       <Canvas 
         style={{ width: '100%', height: '100%' }}
-        camera={{ position: [0, 0, 8] }}
+        camera={{ position: [0, 0, 12] }} // Pull camera back slightly for full view
       >
+        {/* HIL Control: OrbitControls allows for deterministic auditing of the graph */}
         <OrbitControls enableDamping dampingFactor={0.05} />
+        
+        {/* Holographic Lighting */}
         <ambientLight intensity={0.5} color="cyan" />
         <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
-        
+        <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
+
         {/* Render all GΛLYPH Nodes (Axiomatic and Spawned) */}
         {nodes.map(node => (
           <GlyphNode 
@@ -189,7 +181,7 @@ export default function App() {
             position={node.position} 
             color={node.color} 
             label={node.name}
-            onClick={() => console.log(`Node ${node.name} activated.`)}
+            onClick={() => console.log(`Node ${node.name} activated. Console output for HIL interaction.`)}
           />
         ))}
 
