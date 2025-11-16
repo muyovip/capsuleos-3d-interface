@@ -82,24 +82,46 @@ function ManifoldConstraintLayer() {
 }
 
 // 1. The GΛLYPH NODE Component
-function GlyphNode({ position, color, name, onClick }) {
+// Now accepts 'isSelected' and 'onSelect' props
+function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
   const meshRef = useRef()
   const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
     if (meshRef.current) {
-      // Faster, pulsing rotation
+      // Base rotation
       meshRef.current.rotation.x += delta * 0.2
       meshRef.current.rotation.y += delta * 0.1
+      
+      // Visual feedback for selection
+      const scaleFactor = isSelected ? 1.5 : 1.0;
+      meshRef.current.scale.lerp(new THREE.Vector3(scaleFactor, scaleFactor, scaleFactor), 0.1);
+
+      // Add a subtle color pulse when selected
+      if (isSelected) {
+        const pulse = Math.sin(state.clock.elapsedTime * 8) * 0.1 + 0.9;
+        const baseColor = new THREE.Color(color);
+        const highlightColor = new THREE.Color(0xffffff);
+        meshRef.current.material.color.lerpColors(baseColor, highlightColor, pulse * 0.2);
+      } else {
+        meshRef.current.material.color.set(color);
+      }
     }
   })
 
+  // Click handler
+  const handleClick = useCallback((e) => {
+    e.stopPropagation(); // Prevent background click/spawn
+    onSelect(id);
+  }, [id, onSelect]);
+
   return (
-    <group position={position} onClick={onClick}>
+    <group position={position} onClick={handleClick}>
       {/* Icosahedron Mesh - The Glyptic Core */}
       <mesh ref={meshRef}>
         <icosahedronGeometry args={[0.4, 0]} /> 
-        <meshBasicMaterial color={color} wireframe />
+        {/* We use MeshBasicMaterial and let useFrame handle color changes */}
+        <meshBasicMaterial color={color} wireframe /> 
       </mesh>
       
       {/* Text Mesh using Canvas Texture - The Identity Layer */}
@@ -135,6 +157,7 @@ function BackgroundSpawner({ onSpawn }) {
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
+  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set()); // New state for tracking selected nodes
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [db, setDb] = useState(null);
@@ -143,6 +166,25 @@ export default function App() {
 
   // Derive readiness state for the button
   const isReady = db && userId && !loading;
+
+  // --- NODE SELECTION HANDLER (STEP 1: Vector Core Accessible) ---
+  const handleNodeSelect = useCallback((nodeId) => {
+    setSelectedNodeIds(prevSelected => {
+      const newSet = new Set(prevSelected);
+      if (newSet.has(nodeId)) {
+        newSet.delete(nodeId); // Deselect
+      } else {
+        newSet.add(nodeId); // Select
+      }
+      return newSet;
+    });
+  }, []);
+
+  // Get selected node objects for display in the CEX view
+  const selectedNodes = useMemo(() => {
+    return nodes.filter(node => selectedNodeIds.has(node.id));
+  }, [nodes, selectedNodeIds]);
+
 
   // --- 1. FIREBASE INITIALIZATION AND AUTH ---
   useEffect(() => {
@@ -298,7 +340,7 @@ export default function App() {
     } catch (e) {
       console.error("Error injecting RAG artifact:", e);
     }
-  }, [db, userId, nodes, constraints, isReady, ragIndex]);
+  }, [db, nodes, constraints, isReady, ragIndex]);
 
 
   // HIL Input Handler (Spawning new nodes via user click)
@@ -338,7 +380,7 @@ export default function App() {
     } catch (e) {
         console.error("Error spawning node:", e);
     }
-  }, [db, userId, nodes, constraints, isReady]);
+  }, [db, nodes, constraints, isReady]);
 
 
   // Utility to find node position by ID
@@ -394,6 +436,22 @@ export default function App() {
         <br/>User ID: <span className="text-yellow-400 break-words">{userId || "N/A"}</span>
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
         <br/>Status: {isReady ? 'Persistent Grid Locked' : <span className="text-red-400">Syncing...</span>}
+        
+        {/* Vector Core Input Display */}
+        <div className="mt-3 pt-2 border-t border-lime-700">
+            <p className="text-cyan-400 font-bold mb-1">Vector Core Input ($\mathbf{x}$):</p>
+            {selectedNodes.length === 0 ? (
+                <p className="text-gray-400 text-xs italic">Click nodes to build the execution vector.</p>
+            ) : (
+                <ul className="list-disc list-inside text-sm">
+                    {selectedNodes.map(node => (
+                        <li key={node.id} className="text-white" style={{color: node.color}}>
+                            {node.name} <span className="text-gray-500 text-xs">({node.id})</span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
       </div>
 
       {/* RAG Injection Control Panel (Bottom Right) */}
@@ -461,10 +519,12 @@ export default function App() {
         {nodes.map(node => (
           <GlyphNode 
             key={node.id} 
+            id={node.id} // Pass ID for selection
             position={node.position} 
             color={node.color} 
             name={node.name}
-            onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
+            isSelected={selectedNodeIds.has(node.id)} // Pass selection status
+            onSelect={handleNodeSelect} // Pass selection handler
           />
         ))}
 
