@@ -3,13 +3,12 @@ import { OrbitControls, Line } from '@react-three/drei'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
-// --- FIREBASE IMPORTS (MANDATORY FOR PERSISTENCE) ---
+// --- FIREBASE IMPORTS (Standard Modular Structure) ---
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
 // --- AXIOMATIC DATA ---
-// Initial state for the system. This will be written to Firestore if the DB is empty.
 const INITIAL_SYSTEM_STATE = {
   nodes: [
     { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0] },
@@ -106,7 +105,26 @@ function GlyphNode({ position, color, name, onClick }) {
   )
 }
 
-// 2. Main Application (The CapsuleOS Interface - Phase 11 Persistent Grid)
+// 2. Background Click Handler for Spawning (HIL Input)
+function BackgroundSpawner({ onSpawn }) {
+  const handleClick = useCallback((e) => {
+    e.stopPropagation() 
+    if (e.point) {
+      // Round the coordinates for cleaner Firestore data
+      const pos = e.point.toArray().map(v => parseFloat(v.toFixed(2))); 
+      onSpawn(pos);
+    }
+  }, [onSpawn])
+
+  return (
+    <mesh onClick={handleClick}>
+      <planeGeometry args={[200, 200]} /> 
+      <meshBasicMaterial visible={false} />
+    </mesh>
+  )
+}
+
+// 3. Main Application 
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
@@ -118,6 +136,7 @@ export default function App() {
 
   // --- 1. FIREBASE INITIALIZATION AND AUTH ---
   useEffect(() => {
+    let authListener;
     try {
       const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
       if (Object.keys(firebaseConfig).length === 0) {
@@ -132,20 +151,23 @@ export default function App() {
 
       setDb(firestore);
 
-      // Sign in or use the provided custom token
       const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
       
-      const authHandler = onAuthStateChanged(auth, async (user) => {
+      const handleAuth = (user) => {
         if (user) {
           setUserId(user.uid);
         } else {
-          // Fallback to anonymous sign-in if token is missing/expired
-          const anonUser = await signInAnonymously(auth);
-          setUserId(anonUser.user.uid);
+          // If no user is signed in, sign in anonymously
+          signInAnonymously(auth).then(anonUser => {
+            setUserId(anonUser.user.uid);
+          }).catch(e => {
+            console.error("Anonymous sign-in failed:", e);
+          });
         }
         setAuthReady(true);
-        // We set loading false only after auth and initial data fetch is done in the next useEffect
-      });
+      };
+
+      authListener = onAuthStateChanged(auth, handleAuth);
 
       if (token) {
         signInWithCustomToken(auth, token).catch(e => {
@@ -153,14 +175,18 @@ export default function App() {
         });
       }
 
-      return () => authHandler();
     } catch (e) {
       console.error("Firebase setup failed:", e);
       setLoading(false);
     }
+    
+    // Cleanup the auth listener on unmount
+    return () => {
+      if (authListener) authListener();
+    };
   }, []);
 
-  // --- 2. FIRESTORE DATA LISTENER ---
+  // --- 2. FIRESTORE DATA LISTENER AND INITIALIZER ---
   useEffect(() => {
     if (!db || !authReady) return;
 
@@ -168,7 +194,7 @@ export default function App() {
     const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
     const docRef = doc(db, docPath);
 
-    // Set up initial state if the document doesn't exist
+    // Function to set initial state if document doesn't exist
     const initializeState = async () => {
         try {
             await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: true });
@@ -187,7 +213,7 @@ export default function App() {
         // Document doesn't exist, initialize it
         initializeState();
       }
-      setLoading(false);
+      setLoading(false); // Data is loaded or initialization is triggered
     }, (error) => {
       console.error("Firestore snapshot failed:", error);
       setLoading(false);
@@ -224,11 +250,14 @@ export default function App() {
       const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
       const docRef = doc(db, docPath);
 
-      // Atomically update the arrays
+      // We ensure no duplicate nodes are added, then add the new node and constraints
+      const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
+      const allConstraints = [...constraints, ...newConstraints];
+
       await setDoc(docRef, {
-        nodes: [...nodes.filter(n => n.id !== newNode.id), newNode], // Use filter to prevent duplicates
-        constraints: [...constraints, ...newConstraints]
-      }, { merge: true });
+        nodes: uniqueNodes,
+        constraints: allConstraints
+      }, { merge: false }); // Use merge: false for cleaner array replacement
 
       setRagIndex(i => i + 1);
       console.log(`Ingested new RAG artifact: ${newNode.name}`);
@@ -236,6 +265,46 @@ export default function App() {
       console.error("Error injecting RAG artifact:", e);
     }
   }, [db, userId, nodes, constraints, loading, ragIndex]);
+
+
+  // HIL Input Handler (Spawning new nodes via user click)
+  const handleSpawn = useCallback(async (pos) => {
+    if (!db || !userId || loading) return;
+    
+    const newId = `spawn-${Date.now()}`
+    const newNode = { 
+      id: newId, 
+      name: `HIL Input ${nodes.length + 1}`,
+      color: 'white', 
+      position: pos,
+      type: 'HIL-Input',
+      timestamp: Date.now()
+    }
+    
+    // Link new node to a random existing axiomatic node (rag-orch, glyph-eng, vgm-anchor, manifold)
+    const axiomaticIds = INITIAL_SYSTEM_STATE.nodes.map(n => n.id);
+    const existingNodeId = axiomaticIds[Math.floor(Math.random() * axiomaticIds.length)];
+    const newConstraint = [newId, existingNodeId, 'white']; 
+
+    // Update Firestore via setDoc to trigger snapshot listener
+    try {
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
+        const docRef = doc(db, docPath);
+
+        const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
+
+        await setDoc(docRef, {
+            nodes: uniqueNodes,
+            constraints: [...constraints, newConstraint]
+        }, { merge: false });
+
+        console.log(`Spawned new HIL Input node: ${newNode.name}`);
+
+    } catch (e) {
+        console.error("Error spawning node:", e);
+    }
+  }, [db, userId, nodes, constraints, loading]);
 
 
   // Utility to find node position by ID
@@ -364,6 +433,10 @@ export default function App() {
             dashed={false}
           />
         ))}
+        
+        {/* HIL Input Spawner (Click on background to spawn a new HIL node) */}
+        <BackgroundSpawner onSpawn={handleSpawn} />
+
       </Canvas>
     </div>
   )
