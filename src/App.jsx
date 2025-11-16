@@ -1,45 +1,82 @@
-import { Canvas, useThree } from '@react-three/fiber'
-import { useState, useRef, useEffect } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { Canvas, useThree, useFrame } from '@react-three/fiber'
+import { OrbitControls } from '@react-three/drei'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import * as THREE from 'three'
 
-// --- 1. Minimal Test Component (Standard Rotating Cube) ---
-function TestCube() {
+// --- Axiomatic Data Initialization ---
+const INITIAL_AXIOMATIC_NODES = [
+  { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.5, 1.5, 0] },
+  { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.5, 1.5, 0] },
+  { id: 'vgm-anchor', name: 'VGM Anchor', color: 'cyan', position: [0, 3, -2] },
+  { id: 'manifold', name: 'Manifold Constraint', color: 'lime', position: [0, -3, 2] },
+  { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [4, -1, -1] },
+];
+
+// 1. The GΛLYPH NODE Component (Labels omitted for stability)
+function GlyphNode({ position, color, onClick }) {
   const meshRef = useRef()
-  // Basic rotation via useFrame
+  
   useFrame((state, delta) => {
     if (meshRef.current) {
-      meshRef.current.rotation.x += delta
-      meshRef.current.rotation.y += delta * 0.5
+      meshRef.current.rotation.x += delta * 0.2
+      meshRef.current.rotation.y += delta * 0.1
     }
   })
 
   return (
-    <mesh ref={meshRef} position={[0, 0, 0]}>
-      {/* Basic geometry and material */}
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color="cyan" wireframe />
-    </mesh>
+    <group position={position} onClick={onClick}>
+      <mesh ref={meshRef}>
+        <icosahedronGeometry args={[0.4, 0]} /> 
+        <meshBasicMaterial color={color} wireframe />
+      </mesh>
+      {/* <Text> component omitted for immediate stability test */}
+    </group>
   )
 }
 
-// --- 2. Background Spawner (Simplified - Still removed logic) ---
-// Note: Keeping the spawner component structure but removing the complexity 
-// to ensure no errors related to the useThree hook are causing the crash.
-function BackgroundSpawner() {
+// 2. Background Click Handler for Spawning (HIL Input)
+function BackgroundSpawner({ onSpawn }) {
+  const handleClick = useCallback((e) => {
+    e.stopPropagation() 
+    if (e.point) {
+      onSpawn(e.point.toArray())
+    }
+  }, [onSpawn])
+
+  // A large, transparent mesh that covers the background to capture clicks
   return (
-    <mesh>
+    <mesh onClick={handleClick}>
       <planeGeometry args={[100, 100]} />
       <meshBasicMaterial visible={false} />
     </mesh>
   )
 }
 
-// --- 3. Main Application (The CapsuleOS Interface - Test Mode) ---
+// 3. Main Application (The CapsuleOS Interface - Phase 2 Test)
 export default function App() {
-  // Using fixed, hardcoded values for the overlay display for this test
-  const nodeCount = 1
-  const constraintCount = 0
+  const [nodes, setNodes] = useState([])
+  const [constraints, setConstraints] = useState([])
+
+  // Load initial data on mount
+  useEffect(() => {
+    setNodes(INITIAL_AXIOMATIC_NODES);
+    // Constraints array is empty for this test
+  }, []);
+
+
+  const handleSpawn = useCallback((pos) => {
+    const newId = `spawn-${Date.now()}`
+    const newNode = { 
+      id: newId, 
+      name: 'Spawned Glyph', 
+      color: 'orange', 
+      position: pos 
+    }
+    
+    // Add the new node
+    setNodes(c => [...c, newNode])
+    // No constraint added in this phase
+  }, [])
 
   return (
     // Set a dark, full-screen background for the holographic effect
@@ -59,25 +96,36 @@ export default function App() {
           boxShadow: '0 0 10px rgba(50, 255, 50, 0.5)'
         }}
       >
-        CAPSULE OS | **DEX View** Operational (TEST MODE)
-        <br/>Nodes (Glyphs): {nodeCount} | Constraints (Wires): {constraintCount}
-        <br/>Status: Structural Integrity Test In Progress
+        CAPSULE OS | **DEX View** Operational (Phase 2 Test)
+        <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
+        <br/>Status: Controls and Node Stability Test
       </div>
 
-      {/* DEX View: 3D Computational Graph - MVC Test */}
+      {/* DEX View: 3D Computational Graph */}
       <Canvas 
         style={{ width: '100%', height: '100%' }}
-        camera={{ position: [0, 0, 5] }}
+        camera={{ position: [0, 0, 15] }}
       >
+        {/* HIL Control: OrbitControls */}
+        <OrbitControls enableDamping dampingFactor={0.05} />
+        
         {/* Holographic Lighting */}
         <ambientLight intensity={0.5} color="cyan" />
         <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
+        <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
 
-        {/* --- Render Test Cube --- */}
-        <TestCube />
+        {/* Render all GΛLYPH Nodes (Axiomatic and Spawned) */}
+        {nodes.map(node => (
+          <GlyphNode 
+            key={node.id} 
+            position={node.position} 
+            color={node.color} 
+            onClick={() => console.log(`Node ${node.name} activated.`)}
+          />
+        ))}
 
-        {/* Background Spawner retained for context, but non-interactive in test mode */}
-        <BackgroundSpawner />
+        {/* HIL Input Spawner */}
+        <BackgroundSpawner onSpawn={handleSpawn} />
 
       </Canvas>
     </div>
