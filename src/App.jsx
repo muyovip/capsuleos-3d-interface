@@ -1,10 +1,10 @@
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
-import { OrbitControls } from '@react-three/drei'
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { OrbitControls, Line } from '@react-three/drei' // Line component re-introduced
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
 // --- Axiomatic Data Initialization ---
-// Slightly adjusted positions to bring the cluster closer to the center of the frame
+// Node positions for the 5-node GΛLYPH
 const INITIAL_AXIOMATIC_NODES = [
   { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0] },
   { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.0, 1.0, 0] },
@@ -13,9 +13,16 @@ const INITIAL_AXIOMATIC_NODES = [
   { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [3, -0.5, -0.5] },
 ];
 
-const INITIAL_AXIOMATIC_CONSTRAINTS = []; 
+// Defined Lattice Constraints (Wires)
+const INITIAL_AXIOMATIC_CONSTRAINTS = [
+  ['rag-orch', 'glyph-eng', 'lime'], // Node 1 to Node 2
+  ['rag-orch', 'vgm-anchor', 'cyan'], // Node 1 to Node 3
+  ['glyph-eng', 'manifold', 'lime'], // Node 2 to Node 4
+  ['vgm-anchor', 'hax', 'orange'], // Node 3 to Node 5
+  ['manifold', 'hax', 'orange'], // Node 4 to Node 5
+]; 
 
-// 1. The GΛLYPH NODE Component
+// 1. The GΛLYPH NODE Component (Still omitting Text)
 function GlyphNode({ position, color, onClick }) {
   const meshRef = useRef()
   
@@ -32,7 +39,7 @@ function GlyphNode({ position, color, onClick }) {
         <icosahedronGeometry args={[0.4, 0]} /> 
         <meshBasicMaterial color={color} wireframe />
       </mesh>
-      {/* Text component omitted for stability test */}
+      {/* Text component omitted - this is the final stability test target */}
     </group>
   )
 }
@@ -46,7 +53,6 @@ function BackgroundSpawner({ onSpawn }) {
     }
   }, [onSpawn])
 
-  // A large, transparent mesh that covers the background to capture clicks
   return (
     <mesh onClick={handleClick}>
       <planeGeometry args={[200, 200]} /> 
@@ -55,10 +61,33 @@ function BackgroundSpawner({ onSpawn }) {
   )
 }
 
-// 3. Main Application (The CapsuleOS Interface - Phase 4 Mobile Fix)
+// 3. Main Application (The CapsuleOS Interface - Phase 5 Stability Test)
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
+
+  // Utility to find node position by ID
+  const nodeMap = useMemo(() => {
+    return new Map(nodes.map(node => [node.id, node.position]));
+  }, [nodes]);
+
+  // Generate line points from node constraints
+  const linePoints = useMemo(() => {
+    const points = [];
+    constraints.forEach(([startId, endId]) => {
+      const startPos = nodeMap.get(startId);
+      const endPos = nodeMap.get(endId);
+      if (startPos && endPos) {
+        // Line component expects THREE.Vector3 objects
+        points.push([
+            new THREE.Vector3(...startPos), 
+            new THREE.Vector3(...endPos)
+        ]);
+      }
+    });
+    return points;
+  }, [constraints, nodeMap]);
+
 
   // Load initial data on mount
   useEffect(() => {
@@ -82,8 +111,8 @@ export default function App() {
   }, [])
 
   return (
-    // CRITICAL: Ensure the container is guaranteed to fill the viewport
-    <div className="w-screen h-screen bg-gray-950"> 
+    // CRITICAL FIX: Use 'absolute inset-0' to guarantee full viewport coverage and proper touch area.
+    <div className="absolute inset-0 bg-gray-950"> 
       {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
       <div 
         className="absolute top-5 left-5 z-10 p-3 rounded-xl"
@@ -95,26 +124,23 @@ export default function App() {
           boxShadow: '0 0 10px rgba(50, 255, 50, 0.5)'
         }}
       >
-        CAPSULE OS | **DEX View** Operational (Phase 4 Test)
+        CAPSULE OS | **DEX View** Operational (Phase 5 Test)
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: Mobile Fidelity Locked
+        <br/>Status: Lattice Constraint Test
       </div>
 
       {/* DEX View: 3D Computational Graph */}
       <Canvas 
-        // CRITICAL: Ensure the canvas itself fills the container
         className="w-full h-full"
         style={{ display: 'block' }} 
-        // Explicitly set clipping planes to stabilize zoom
         camera={{ position: [0, 0, 10], near: 0.1, far: 100 }} 
       >
         {/* HIL Control: OrbitControls */}
         <OrbitControls 
           enableDamping 
           dampingFactor={0.05} 
-          minDistance={3} // Prevents zooming too close to nodes
-          maxDistance={30} // Prevents zooming too far away
-          // Ensure touch controls are properly configured for mobile
+          minDistance={5} // Increased minDistance slightly to aid clipping
+          maxDistance={30} 
           touches={{
             ONE: THREE.TOUCH.ROTATE,
             TWO: THREE.TOUCH.DOLLY,
@@ -134,6 +160,17 @@ export default function App() {
             position={node.position} 
             color={node.color} 
             onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
+          />
+        ))}
+
+        {/* Render Lattice Constraints (Wires) */}
+        {linePoints.map((points, index) => (
+          <Line
+            key={index}
+            points={points}
+            color={constraints[index][2]} // Use the defined constraint color
+            lineWidth={2}
+            dashed={false}
           />
         ))}
 
