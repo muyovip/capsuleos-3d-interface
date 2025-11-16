@@ -7,6 +7,10 @@ import * as THREE from 'three'
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { setLogLevel } from 'firebase/firestore';
+
+// Enable Firestore debug logging
+setLogLevel('debug');
 
 // --- AXIOMATIC DATA ---
 const INITIAL_SYSTEM_STATE = {
@@ -137,14 +141,19 @@ export default function App() {
   const [userId, setUserId] = useState(null);
   const [ragIndex, setRagIndex] = useState(0);
 
+  // Derive readiness state for the button
+  const isReady = db && userId && !loading;
+
   // --- 1. FIREBASE INITIALIZATION AND AUTH ---
   useEffect(() => {
     let authListener;
     try {
       const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
       if (Object.keys(firebaseConfig).length === 0) {
-        console.error("Firebase config is missing.");
+        console.error("Firebase config is missing. Displaying initial state, persistence disabled.");
         setLoading(false);
+        setNodes(INITIAL_SYSTEM_STATE.nodes);
+        setConstraints(INITIAL_SYSTEM_STATE.constraints);
         return;
       }
       
@@ -160,10 +169,12 @@ export default function App() {
       const handleAuth = (user) => {
         if (user) {
           setUserId(user.uid);
+          console.log("Authenticated with UID:", user.uid);
         } else {
           // If no user is signed in, sign in anonymously
           signInAnonymously(auth).then(anonUser => {
             setUserId(anonUser.user.uid);
+            console.log("Signed in anonymously with UID:", anonUser.user.uid);
           }).catch(e => {
             console.error("Anonymous sign-in failed:", e);
           });
@@ -176,6 +187,7 @@ export default function App() {
       // Attempt custom token sign-in first if token exists
       if (token) {
         signInWithCustomToken(auth, token).catch(e => {
+          // If custom token fails, onAuthStateChanged fallback will handle it
           console.error("Custom token sign-in failed. Falling back to onAuthStateChanged.", e);
         });
       }
@@ -204,9 +216,8 @@ export default function App() {
     // Function to set initial state if document doesn't exist
     const initializeState = async () => {
         try {
-            // Set the INITIAL_SYSTEM_STATE structure
-            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: true });
-            console.log("Initialized Axiomatic State.");
+            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false });
+            console.log("Initialized Axiomatic State in Firestore.");
         } catch (e) {
             console.error("Error setting initial state:", e);
         }
@@ -217,11 +228,20 @@ export default function App() {
         const data = docSnapshot.data();
         setNodes(data.nodes || []);
         setConstraints(data.constraints || []);
+        console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
       } else {
-        // Document doesn't exist, initialize it (idempotent)
-        initializeState();
+        // Document doesn't exist, initialize it:
+        // 1. Set local state immediately for visual feedback (THE FIX)
+        setNodes(INITIAL_SYSTEM_STATE.nodes);
+        setConstraints(INITIAL_SYSTEM_STATE.constraints);
+        
+        // 2. Initialize the document in Firestore
+        initializeState(); 
+        
+        console.log("Document missing. Initializing local state and writing to Firestore.");
       }
-      setLoading(false); // Data is loaded or initialization is triggered
+      // Data is either successfully retrieved or initialization is triggered, so stop loading
+      setLoading(false); 
     }, (error) => {
       console.error("Firestore snapshot failed:", error);
       setLoading(false);
@@ -234,7 +254,10 @@ export default function App() {
   // --- RAG INGESTION HANDLER (Adds next artifact from the predefined list) ---
   const handleRAGIngestion = useCallback(async () => {
     // Guard clause to prevent execution before setup is complete
-    if (!db || !userId || loading) return;
+    if (!isReady) {
+        console.warn("System not ready for RAG ingestion. Waiting for DB/Auth lock.");
+        return; 
+    }
 
     const artifact = RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length];
     
@@ -275,12 +298,12 @@ export default function App() {
     } catch (e) {
       console.error("Error injecting RAG artifact:", e);
     }
-  }, [db, userId, nodes, constraints, loading, ragIndex]);
+  }, [db, userId, nodes, constraints, isReady, ragIndex]);
 
 
   // HIL Input Handler (Spawning new nodes via user click)
   const handleSpawn = useCallback(async (pos) => {
-    if (!db || !userId || loading) return;
+    if (!isReady) return;
     
     const newId = `hil-input-${Date.now()}`
     const newNode = { 
@@ -315,7 +338,7 @@ export default function App() {
     } catch (e) {
         console.error("Error spawning node:", e);
     }
-  }, [db, userId, nodes, constraints, loading]);
+  }, [db, userId, nodes, constraints, isReady]);
 
 
   // Utility to find node position by ID
@@ -370,7 +393,7 @@ export default function App() {
         CAPSULE OS | **DEX View** Operational
         <br/>User ID: <span className="text-yellow-400 break-words">{userId || "N/A"}</span>
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: Persistent Grid Locked.
+        <br/>Status: {isReady ? 'Persistent Grid Locked' : <span className="text-red-400">Syncing...</span>}
       </div>
 
       {/* RAG Injection Control Panel (Bottom Right) */}
@@ -386,15 +409,24 @@ export default function App() {
         <p className="text-sm mb-2 text-lime-300">RAG Pipeline Control (Simulate Ingestion)</p>
         <button 
           onClick={handleRAGIngestion}
-          className="px-4 py-2 bg-indigo-700 hover:bg-indigo-600 transition duration-150 rounded-full text-white font-bold text-lg shadow-xl"
+          disabled={!isReady} // Disable button until ready
+          className={`px-4 py-2 transition duration-150 rounded-full text-white font-bold text-lg shadow-xl ${
+            isReady 
+              ? 'bg-indigo-700 hover:bg-indigo-600' 
+              : 'bg-gray-500 cursor-not-allowed'
+          }`}
           style={{ 
-            boxShadow: '0 0 10px rgba(120, 100, 255, 0.8), inset 0 0 5px rgba(255, 255, 255, 0.5)',
-            border: '2px solid #a5b4fc',
+            boxShadow: isReady 
+              ? '0 0 10px rgba(120, 100, 255, 0.8), inset 0 0 5px rgba(255, 255, 255, 0.5)'
+              : 'none',
+            border: isReady ? '2px solid #a5b4fc' : 'none',
           }}
         >
-          Inject Next RAG Artifact
+          {isReady ? 'Inject Next RAG Artifact' : 'Connecting...'}
         </button>
-        <p className="text-xs mt-2 text-gray-400">Artifact #{ragIndex + 1}: {RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length].name}</p>
+        <p className="text-xs mt-2 text-gray-400">
+          {ragIndex < RAG_ARTIFACTS.length ? `Artifact #${ragIndex + 1}: ${RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length].name}` : 'All initial RAG artifacts injected.'}
+        </p>
       </div>
 
 
