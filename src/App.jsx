@@ -1,11 +1,9 @@
 import { Canvas, useFrame } from '@react-three/fiber'
-// NOTE: Updated drei/three versions to attempt to resolve peer dependency warnings
 import { OrbitControls, Line } from '@react-three/drei' 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
-// --- FIREBASE IMPORTS (Adjusted for Build Stability) ---
-// We use the full path to force the build environment to resolve the modules correctly.
+// --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
