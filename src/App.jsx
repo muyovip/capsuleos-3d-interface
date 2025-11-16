@@ -1,10 +1,10 @@
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
-import { OrbitControls, Line } from '@react-three/drei' // Line component re-introduced
+// Reintroducing Text
+import { OrbitControls, Line, Text } from '@react-three/drei' 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
 // --- Axiomatic Data Initialization ---
-// Node positions for the 5-node GΛLYPH
 const INITIAL_AXIOMATIC_NODES = [
   { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0] },
   { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.0, 1.0, 0] },
@@ -13,17 +13,16 @@ const INITIAL_AXIOMATIC_NODES = [
   { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [3, -0.5, -0.5] },
 ];
 
-// Defined Lattice Constraints (Wires)
 const INITIAL_AXIOMATIC_CONSTRAINTS = [
-  ['rag-orch', 'glyph-eng', 'lime'], // Node 1 to Node 2
-  ['rag-orch', 'vgm-anchor', 'cyan'], // Node 1 to Node 3
-  ['glyph-eng', 'manifold', 'lime'], // Node 2 to Node 4
-  ['vgm-anchor', 'hax', 'orange'], // Node 3 to Node 5
-  ['manifold', 'hax', 'orange'], // Node 4 to Node 5
+  ['rag-orch', 'glyph-eng', 'lime'],
+  ['rag-orch', 'vgm-anchor', 'cyan'],
+  ['glyph-eng', 'manifold', 'lime'],
+  ['vgm-anchor', 'hax', 'orange'],
+  ['manifold', 'hax', 'orange'],
 ]; 
 
-// 1. The GΛLYPH NODE Component (Still omitting Text)
-function GlyphNode({ position, color, onClick }) {
+// 1. The GΛLYPH NODE Component (Includes Text)
+function GlyphNode({ position, color, name, onClick }) {
   const meshRef = useRef()
   
   useFrame((state, delta) => {
@@ -39,7 +38,18 @@ function GlyphNode({ position, color, onClick }) {
         <icosahedronGeometry args={[0.4, 0]} /> 
         <meshBasicMaterial color={color} wireframe />
       </mesh>
-      {/* Text component omitted - this is the final stability test target */}
+      
+      {/* Reintroducing Text: Safest configuration */}
+      <Text 
+        position={[0, 0.7, 0]} // Offset above the node
+        fontSize={0.4} 
+        color={color} 
+        font="/fonts/Inter-Bold.woff" // Placeholder font path
+        anchorX="center" 
+        anchorY="middle"
+      >
+        {name}
+      </Text>
     </group>
   )
 }
@@ -61,10 +71,28 @@ function BackgroundSpawner({ onSpawn }) {
   )
 }
 
-// 3. Main Application (The CapsuleOS Interface - Phase 5 Stability Test)
+// 3. Main Application (The CapsuleOS Interface - Phase 6 Final Fidelity)
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
+  
+  // State for dynamic height fix
+  const [viewportHeight, setViewportHeight] = useState('100vh');
+
+  // CRITICAL FIX: Dynamic viewport height calculation for mobile
+  useEffect(() => {
+    const handleResize = () => {
+      setViewportHeight(`${window.innerHeight}px`);
+    };
+
+    // Set initial height
+    handleResize();
+
+    // Attach resize listener to handle dynamic address bars
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
 
   // Utility to find node position by ID
   const nodeMap = useMemo(() => {
@@ -74,15 +102,15 @@ export default function App() {
   // Generate line points from node constraints
   const linePoints = useMemo(() => {
     const points = [];
-    constraints.forEach(([startId, endId]) => {
+    constraints.forEach(([startId, endId, color]) => {
       const startPos = nodeMap.get(startId);
       const endPos = nodeMap.get(endId);
       if (startPos && endPos) {
         // Line component expects THREE.Vector3 objects
-        points.push([
-            new THREE.Vector3(...startPos), 
-            new THREE.Vector3(...endPos)
-        ]);
+        points.push({
+          points: [new THREE.Vector3(...startPos), new THREE.Vector3(...endPos)],
+          color: color
+        });
       }
     });
     return points;
@@ -101,18 +129,21 @@ export default function App() {
     const newNode = { 
       id: newId, 
       name: 'Spawned Glyph', 
-      color: 'orange', 
+      color: 'white', 
       position: pos 
     }
     
-    // Add the new node
+    // Simple logic to link new node to a random existing node
+    const existingNode = nodes[Math.floor(Math.random() * nodes.length)];
+    const newConstraint = [newId, existingNode.id, 'white']; 
+
     setNodes(c => [...c, newNode])
-    // No constraint added in this phase
-  }, [])
+    setConstraints(c => [...c, newConstraint])
+  }, [nodes])
 
   return (
-    // CRITICAL FIX: Use 'absolute inset-0' to guarantee full viewport coverage and proper touch area.
-    <div className="absolute inset-0 bg-gray-950"> 
+    // CRITICAL FIX: Apply dynamic height to the container
+    <div className="absolute inset-0 bg-gray-950" style={{ height: viewportHeight }}> 
       {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
       <div 
         className="absolute top-5 left-5 z-10 p-3 rounded-xl"
@@ -124,9 +155,9 @@ export default function App() {
           boxShadow: '0 0 10px rgba(50, 255, 50, 0.5)'
         }}
       >
-        CAPSULE OS | **DEX View** Operational (Phase 5 Test)
+        CAPSULE OS | **DEX View** Operational
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: Lattice Constraint Test
+        <br/>Status: Final Fidelity Lock
       </div>
 
       {/* DEX View: 3D Computational Graph */}
@@ -139,13 +170,15 @@ export default function App() {
         <OrbitControls 
           enableDamping 
           dampingFactor={0.05} 
-          minDistance={5} // Increased minDistance slightly to aid clipping
+          minDistance={5} 
           maxDistance={30} 
           touches={{
             ONE: THREE.TOUCH.ROTATE,
             TWO: THREE.TOUCH.DOLLY,
             THREE: THREE.TOUCH.PAN,
           }}
+          // Ensures the control area uses the entire canvas element
+          domElement={document.querySelector('canvas') || undefined}
         />
         
         {/* Holographic Lighting */}
@@ -159,16 +192,17 @@ export default function App() {
             key={node.id} 
             position={node.position} 
             color={node.color} 
+            name={node.name} // Pass name for text rendering
             onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
           />
         ))}
 
         {/* Render Lattice Constraints (Wires) */}
-        {linePoints.map((points, index) => (
+        {linePoints.map(({ points, color }, index) => (
           <Line
             key={index}
             points={points}
-            color={constraints[index][2]} // Use the defined constraint color
+            color={color} 
             lineWidth={2}
             dashed={false}
           />
