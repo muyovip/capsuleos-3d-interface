@@ -1,6 +1,5 @@
 import { Canvas, useThree, useFrame } from '@react-three/fiber'
-// Reintroducing Text
-import { OrbitControls, Line, Text } from '@react-three/drei' 
+import { OrbitControls, Line } from '@react-three/drei' 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
@@ -21,9 +20,30 @@ const INITIAL_AXIOMATIC_CONSTRAINTS = [
   ['manifold', 'hax', 'orange'],
 ]; 
 
-// 1. The GΛLYPH NODE Component (Includes Text)
+// Helper function to create a texture with text on it
+function createTextTexture(text, color, fontSize = 48) {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  
+  // Set canvas size based on text length (simplified)
+  canvas.width = 512;
+  canvas.height = 128;
+
+  context.font = `Bold ${fontSize}px monospace`;
+  context.fillStyle = color;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+// 1. The GΛLYPH NODE Component (Uses Canvas Text Mesh)
 function GlyphNode({ position, color, name, onClick }) {
   const meshRef = useRef()
+  const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
     if (meshRef.current) {
@@ -34,22 +54,17 @@ function GlyphNode({ position, color, name, onClick }) {
 
   return (
     <group position={position} onClick={onClick}>
+      {/* Icosahedron Mesh */}
       <mesh ref={meshRef}>
         <icosahedronGeometry args={[0.4, 0]} /> 
         <meshBasicMaterial color={color} wireframe />
       </mesh>
       
-      {/* Reintroducing Text: Safest configuration */}
-      <Text 
-        position={[0, 0.7, 0]} // Offset above the node
-        fontSize={0.4} 
-        color={color} 
-        font="/fonts/Inter-Bold.woff" // Placeholder font path
-        anchorX="center" 
-        anchorY="middle"
-      >
-        {name}
-      </Text>
+      {/* Text Mesh using Canvas Texture (Stable alternative to Drei/Text) */}
+      <mesh position={[0, 0.7, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[2.5, 0.6]} />
+        <meshBasicMaterial map={texture} transparent />
+      </mesh>
     </group>
   )
 }
@@ -71,28 +86,10 @@ function BackgroundSpawner({ onSpawn }) {
   )
 }
 
-// 3. Main Application (The CapsuleOS Interface - Phase 6 Final Fidelity)
+// 3. Main Application (The CapsuleOS Interface - Phase 7 Final Lock)
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
-  
-  // State for dynamic height fix
-  const [viewportHeight, setViewportHeight] = useState('100vh');
-
-  // CRITICAL FIX: Dynamic viewport height calculation for mobile
-  useEffect(() => {
-    const handleResize = () => {
-      setViewportHeight(`${window.innerHeight}px`);
-    };
-
-    // Set initial height
-    handleResize();
-
-    // Attach resize listener to handle dynamic address bars
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
 
   // Utility to find node position by ID
   const nodeMap = useMemo(() => {
@@ -106,7 +103,6 @@ export default function App() {
       const startPos = nodeMap.get(startId);
       const endPos = nodeMap.get(endId);
       if (startPos && endPos) {
-        // Line component expects THREE.Vector3 objects
         points.push({
           points: [new THREE.Vector3(...startPos), new THREE.Vector3(...endPos)],
           color: color
@@ -128,7 +124,7 @@ export default function App() {
     const newId = `spawn-${Date.now()}`
     const newNode = { 
       id: newId, 
-      name: 'Spawned Glyph', 
+      name: `Spawned ${nodes.length + 1}`, // Updated name for newly spawned nodes
       color: 'white', 
       position: pos 
     }
@@ -142,8 +138,11 @@ export default function App() {
   }, [nodes])
 
   return (
-    // CRITICAL FIX: Apply dynamic height to the container
-    <div className="absolute inset-0 bg-gray-950" style={{ height: viewportHeight }}> 
+    // FINAL CSS FIX: Use 100vw and dvh (Dynamic Viewport Height) for full mobile compatibility
+    <div 
+      className="w-screen bg-gray-950" 
+      style={{ height: '100dvh' }} 
+    > 
       {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
       <div 
         className="absolute top-5 left-5 z-10 p-3 rounded-xl"
@@ -157,7 +156,7 @@ export default function App() {
       >
         CAPSULE OS | **DEX View** Operational
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: Final Fidelity Lock
+        <br/>Status: Final Fidelity Lock (Canvas Text)
       </div>
 
       {/* DEX View: 3D Computational Graph */}
@@ -177,8 +176,6 @@ export default function App() {
             TWO: THREE.TOUCH.DOLLY,
             THREE: THREE.TOUCH.PAN,
           }}
-          // Ensures the control area uses the entire canvas element
-          domElement={document.querySelector('canvas') || undefined}
         />
         
         {/* Holographic Lighting */}
