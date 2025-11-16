@@ -86,6 +86,9 @@ const RAG_ARTIFACTS = [
 
 // Helper function to create a texture with text on it (Absolute Fidelity)
 function createTextTexture(text, color, fontSize = 64) { 
+  // CRITICAL FIX: Ensure 'document' exists before creating canvas
+  if (typeof document === 'undefined') return new THREE.Texture(); 
+
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   
@@ -132,6 +135,8 @@ function ManifoldConstraintLayer() {
 // Now accepts 'isSelected' and 'onSelect' props
 function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
   const meshRef = useRef()
+  
+  // FIX: Recalculate texture only when name or color changes, and initialize it inside the callback
   const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
