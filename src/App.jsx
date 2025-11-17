@@ -1,73 +1,18 @@
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Line } from '@react-three/drei' 
-// We import 'Component' explicitly for the ErrorBoundary pattern
-import React, { useState, useRef, useEffect, useCallback, useMemo, Component } from 'react' 
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
-// --- FIREBASE IMPORTS (Using CDN URLs for consistency) ---
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+// --- FIREBASE IMPORTS ---
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { setLogLevel } from 'firebase/firestore';
 
-// --- GLOBAL LOGGING FIX (Prevent crash on import error) ---
-// We cannot use 'import { setLogLevel } from "firebase/firestore"' due to the hybrid environment.
-// Instead, we try to access the logging function if it's available on the global Firebase namespace,
-// but only within a try/catch to avoid a fatal import error.
-try {
-  // Check if a global Firestore instance or similar logging utility exists and set debug level
-  if (typeof window !== 'undefined' && window.firebase && window.firebase.firestore) {
-     window.firebase.firestore.setLogLevel('debug');
-  }
-} catch (e) {
-  // Ignore error if setLogLevel is not available on load, preventing app crash
-  console.warn("Could not set Firestore log level globally. Continuing without debug logging.", e);
-}
+// Enable Firestore debug logging
+setLogLevel('debug');
 
-
-// --- R3F ERROR BOUNDARY (Kept for runtime 3D errors) ---
-class R3FErrorBoundary extends Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    console.error("R3F Component Error Caught:", error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div 
-          className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-red-950/90 text-red-300 font-mono p-10"
-          style={{ height: '100dvh', backdropFilter: 'blur(5px)' }}
-        >
-          <h1 className="text-xl font-bold text-yellow-400">CRITICAL KERNEL ERROR (WebGL/Dependency)</h1>
-          <p className="mt-4 text-center text-sm">
-            A fatal rendering error occurred inside the 3D view. 
-            This often indicates a **WebGL failure** on this device.
-          </p>
-          <pre className="mt-4 p-3 bg-red-800/50 rounded text-xs overflow-auto max-w-full">
-            {this.state.error ? this.state.error.toString() : "Unknown Error - Check Console Logs"}
-          </pre>
-          <p className="mt-4 text-xs text-lime-400">
-            **Action Required:** If this persists, try viewing the app in a different, modern browser (Chrome, Safari, Firefox).
-          </p>
-        </div>
-      );
-    }
-
-    return this.props.children; 
-  }
-}
-// --- END R3F ERROR BOUNDARY ---
-
-
-// --- AXIOMATIC DATA (NO CHANGE) ---
+// --- AXIOMATIC DATA ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
     { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0] },
@@ -85,7 +30,7 @@ const INITIAL_SYSTEM_STATE = {
   ],
 };
 
-// --- RAG INGESTION ARTIFACTS (NO CHANGE) ---
+// --- RAG INGESTION ARTIFACTS ---
 const RAG_ARTIFACTS = [
     { name: "Regenesis Dystopia", color: "red", type: "RAG-Synthesis", pos: [-3, -4, 2], links: ['rag-orch', 'glyph-eng'] },
     { name: "QLM-NFT Protocol", color: "purple", type: "VGM-Output", pos: [4, 3, -1], links: ['vgm-anchor', 'hax'] },
@@ -94,9 +39,6 @@ const RAG_ARTIFACTS = [
 
 // Helper function to create a texture with text on it (Absolute Fidelity)
 function createTextTexture(text, color, fontSize = 64) { 
-  // CRITICAL FIX: Ensure 'document' exists before creating canvas
-  if (typeof document === 'undefined') return new THREE.Texture(); 
-
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   
@@ -140,9 +82,9 @@ function ManifoldConstraintLayer() {
 }
 
 // 1. The GΛLYPH NODE Component
+// Now accepts 'isSelected' and 'onSelect' props
 function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
   const meshRef = useRef()
-  
   const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
@@ -162,7 +104,9 @@ function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
         const highlightColor = new THREE.Color(0xffffff);
         meshRef.current.material.color.lerpColors(baseColor, highlightColor, pulse * 0.2);
       } else {
-        meshRef.current.material.color.set(color);
+        // Ensure the color is reset when deselected
+        const baseColor = new THREE.Color(color);
+        meshRef.current.material.color.lerp(baseColor, 0.1);
       }
     }
   })
@@ -174,10 +118,11 @@ function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
   }, [id, onSelect]);
 
   return (
-    <group position={position} onClick={handleClick}>
-      {/* Icosahedron Mesh - The Glyptic Core */}
-      <mesh ref={meshRef}>
+    <group position={position}>
+      {/* Icosahedron Mesh - The Glyptic Core - onClick moved here! */}
+      <mesh ref={meshRef} onClick={handleClick}> 
         <icosahedronGeometry args={[0.4, 0]} /> 
+        {/* We use MeshBasicMaterial and let useFrame handle color changes */}
         <meshBasicMaterial color={color} wireframe /> 
       </mesh>
       
@@ -214,7 +159,7 @@ function BackgroundSpawner({ onSpawn }) {
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
-  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set()); 
+  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set()); // New state for tracking selected nodes
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [db, setDb] = useState(null);
@@ -229,9 +174,9 @@ export default function App() {
     setSelectedNodeIds(prevSelected => {
       const newSet = new Set(prevSelected);
       if (newSet.has(nodeId)) {
-        newSet.delete(nodeId); 
+        newSet.delete(nodeId); // Deselect
       } else {
-        newSet.add(nodeId); 
+        newSet.add(nodeId); // Select
       }
       return newSet;
     });
@@ -315,7 +260,8 @@ export default function App() {
     // Function to set initial state if document doesn't exist
     const initializeState = async () => {
         try {
-            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false });
+            // Use setDoc to overwrite/create the document, setting merge to false to ensure array replacement
+            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false }); 
             console.log("Initialized Axiomatic State in Firestore.");
         } catch (e) {
             console.error("Error setting initial state:", e);
@@ -350,7 +296,7 @@ export default function App() {
   }, [db, authReady]);
   
   
-  // --- RAG INGESTION HANDLER ---
+  // --- RAG INGESTION HANDLER (Adds next artifact from the predefined list) ---
   const handleRAGIngestion = useCallback(async () => {
     // Guard clause to prevent execution before setup is complete
     if (!isReady) {
@@ -360,15 +306,18 @@ export default function App() {
 
     const artifact = RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length];
     
+    // Create new node object
     const newNode = {
       id: artifact.name.replace(/\s/g, '-').toLowerCase(),
       name: artifact.name,
       color: artifact.color,
+      // Use the predefined position from the RAG_ARTIFACTS list
       position: artifact.pos, 
       type: artifact.type,
       timestamp: Date.now()
     };
 
+    // Create new constraint objects linking to the Axiomatic foundations
     const newConstraints = artifact.links.map(linkId => ([
       newNode.id, linkId, newNode.color 
     ]));
@@ -379,13 +328,15 @@ export default function App() {
       const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
       const docRef = doc(db, docPath);
 
+      // Ensure no duplicate nodes are added (by ID), then append the new node.
       const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
+      // Append new constraints
       const allConstraints = [...constraints, ...newConstraints];
 
       await setDoc(docRef, {
         nodes: uniqueNodes,
         constraints: allConstraints
-      }, { merge: false }); 
+      }, { merge: false }); // Overwrite the arrays completely with the new set
 
       setRagIndex(i => i + 1);
       console.log(`Ingested new RAG artifact: ${newNode.name}`);
@@ -409,7 +360,7 @@ export default function App() {
       timestamp: Date.now()
     }
     
-    // Link new node to a random existing axiomatic node
+    // Link new node to a random existing axiomatic node (rag-orch, glyph-eng, vgm-anchor, manifold, hax)
     const axiomaticIds = INITIAL_SYSTEM_STATE.nodes.map(n => n.id);
     const existingNodeId = axiomaticIds[Math.floor(Math.random() * axiomaticIds.length)];
     const newConstraint = [newId, existingNodeId, 'white']; 
@@ -437,6 +388,7 @@ export default function App() {
 
   // Utility to find node position by ID
   const nodeMap = useMemo(() => {
+    // Map node ID to its position vector [x, y, z]
     return new Map(nodes.map(node => [node.id, node.position]));
   }, [nodes]);
 
@@ -518,7 +470,7 @@ export default function App() {
         <p className="text-sm mb-2 text-lime-300">RAG Pipeline Control (Simulate Ingestion)</p>
         <button 
           onClick={handleRAGIngestion}
-          disabled={!isReady} 
+          disabled={!isReady} // Disable button until ready
           className={`px-4 py-2 transition duration-150 rounded-full text-white font-bold text-lg shadow-xl ${
             isReady 
               ? 'bg-indigo-700 hover:bg-indigo-600' 
@@ -540,62 +492,60 @@ export default function App() {
 
 
       {/* DEX View: 3D Computational Graph */}
-      <R3FErrorBoundary> 
-        <Canvas 
-          className="w-full h-full"
-          style={{ display: 'block' }} 
-          camera={{ position: [0, 0, 10], near: 0.1, far: 100 }} 
-        >
-          {/* Allows user to pan and rotate the view */}
-          <OrbitControls 
-            enableDamping 
-            dampingFactor={0.05} 
-            minDistance={5} 
-            maxDistance={30} 
-            touches={{
-              ONE: THREE.TOUCH.ROTATE,
-              TWO: THREE.TOUCH.DOLLY,
-              THREE: THREE.TOUCH.PAN,
-            }}
+      <Canvas 
+        className="w-full h-full"
+        style={{ display: 'block' }} 
+        camera={{ position: [0, 0, 10], near: 0.1, far: 100 }} 
+      >
+        {/* Allows user to pan and rotate the view */}
+        <OrbitControls 
+          enableDamping 
+          dampingFactor={0.05} 
+          minDistance={5} 
+          maxDistance={30} 
+          touches={{
+            ONE: THREE.TOUCH.ROTATE,
+            TWO: THREE.TOUCH.DOLLY,
+            THREE: THREE.TOUCH.PAN,
+          }}
+        />
+        
+        {/* Holographic Lighting */}
+        <ambientLight intensity={0.5} color="cyan" />
+        <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
+        <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
+
+        {/* --- Manifold Constraint Layer (Boundary) --- */}
+        <ManifoldConstraintLayer />
+
+        {/* Render all GΛLYPH Nodes (Axiomatic and RAG-Derived) */}
+        {nodes.map(node => (
+          <GlyphNode 
+            key={node.id} 
+            id={node.id} // Pass ID for selection
+            position={node.position} 
+            color={node.color} 
+            name={node.name}
+            isSelected={selectedNodeIds.has(node.id)} // Pass selection status
+            onSelect={handleNodeSelect} // Pass selection handler
           />
-          
-          {/* Holographic Lighting */}
-          <ambientLight intensity={0.5} color="cyan" />
-          <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
-          <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
+        ))}
 
-          {/* --- Manifold Constraint Layer (Boundary) --- */}
-          <ManifoldConstraintLayer />
+        {/* Render Lattice Constraints (Wires) */}
+        {linePoints.map(({ points, color }, index) => (
+          <Line
+            key={index}
+            points={points}
+            color={color} 
+            lineWidth={2}
+            dashed={false}
+          />
+        ))}
+        
+        {/* HIL Input Spawner (Click on background to spawn a new HIL node) */}
+        <BackgroundSpawner onSpawn={handleSpawn} />
 
-          {/* Render all GΛLYPH Nodes (Axiomatic and RAG-Derived) */}
-          {nodes.map(node => (
-            <GlyphNode 
-              key={node.id} 
-              id={node.id} 
-              position={node.position} 
-              color={node.color} 
-              name={node.name}
-              isSelected={selectedNodeIds.has(node.id)} 
-              onSelect={handleNodeSelect} 
-            />
-          ))}
-
-          {/* Render Lattice Constraints (Wires) */}
-          {linePoints.map(({ points, color }, index) => (
-            <Line
-              key={index}
-              points={points}
-              color={color} 
-              lineWidth={2}
-              dashed={false}
-            />
-          ))}
-          
-          {/* HIL Input Spawner (Click on background to spawn a new HIL node) */}
-          <BackgroundSpawner onSpawn={handleSpawn} />
-
-        </Canvas>
-      </R3FErrorBoundary>
+      </Canvas>
     </div>
   )
 }
