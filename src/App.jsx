@@ -7,7 +7,7 @@ import * as THREE from 'three'
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js'; // Ensure correct import for Firestore
 import { setLogLevel } from 'firebase/firestore';
 
 // Enable Firestore debug logging
@@ -470,7 +470,8 @@ export default function App() {
 
   return (
     <div 
-      className="w-screen bg-gray-950" 
+      // TEMPORARY DEBUGGING STEP: Change background to red
+      className="w-screen bg-red-900" 
       style={{ height: '100dvh' }} 
     > 
       {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
