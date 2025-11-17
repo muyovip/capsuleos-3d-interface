@@ -104,9 +104,7 @@ function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
         const highlightColor = new THREE.Color(0xffffff);
         meshRef.current.material.color.lerpColors(baseColor, highlightColor, pulse * 0.2);
       } else {
-        // Ensure the color is reset when deselected
-        const baseColor = new THREE.Color(color);
-        meshRef.current.material.color.lerp(baseColor, 0.1);
+        meshRef.current.material.color.set(color);
       }
     }
   })
@@ -118,9 +116,9 @@ function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
   }, [id, onSelect]);
 
   return (
-    <group position={position}>
-      {/* Icosahedron Mesh - The Glyptic Core - onClick moved here! */}
-      <mesh ref={meshRef} onClick={handleClick}> 
+    <group position={position} onClick={handleClick}>
+      {/* Icosahedron Mesh - The Glyptic Core */}
+      <mesh ref={meshRef}>
         <icosahedronGeometry args={[0.4, 0]} /> 
         {/* We use MeshBasicMaterial and let useFrame handle color changes */}
         <meshBasicMaterial color={color} wireframe /> 
@@ -260,8 +258,7 @@ export default function App() {
     // Function to set initial state if document doesn't exist
     const initializeState = async () => {
         try {
-            // Use setDoc to overwrite/create the document, setting merge to false to ensure array replacement
-            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false }); 
+            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false });
             console.log("Initialized Axiomatic State in Firestore.");
         } catch (e) {
             console.error("Error setting initial state:", e);
@@ -276,7 +273,7 @@ export default function App() {
         console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
       } else {
         // Document doesn't exist, initialize it:
-        // 1. Set local state immediately for visual feedback
+        // 1. Set local state immediately for visual feedback (THE FIX)
         setNodes(INITIAL_SYSTEM_STATE.nodes);
         setConstraints(INITIAL_SYSTEM_STATE.constraints);
         
