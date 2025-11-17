@@ -4,17 +4,27 @@ import { OrbitControls, Line } from '@react-three/drei'
 import React, { useState, useRef, useEffect, useCallback, useMemo, Component } from 'react' 
 import * as THREE from 'three'
 
-// --- FIREBASE IMPORTS ---
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js'; // Ensure correct import for Firestore
-import { setLogLevel } from 'firebase/firestore';
+// --- FIREBASE IMPORTS (Using CDN URLs for consistency) ---
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-// Enable Firestore debug logging
-setLogLevel('debug');
+// --- GLOBAL LOGGING FIX (Prevent crash on import error) ---
+// We cannot use 'import { setLogLevel } from "firebase/firestore"' due to the hybrid environment.
+// Instead, we try to access the logging function if it's available on the global Firebase namespace,
+// but only within a try/catch to avoid a fatal import error.
+try {
+  // Check if a global Firestore instance or similar logging utility exists and set debug level
+  if (typeof window !== 'undefined' && window.firebase && window.firebase.firestore) {
+     window.firebase.firestore.setLogLevel('debug');
+  }
+} catch (e) {
+  // Ignore error if setLogLevel is not available on load, preventing app crash
+  console.warn("Could not set Firestore log level globally. Continuing without debug logging.", e);
+}
 
-// --- R3F ERROR BOUNDARY ---
-// This component will catch crashes inside the Canvas and display an error.
+
+// --- R3F ERROR BOUNDARY (Kept for runtime 3D errors) ---
 class R3FErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -26,13 +36,11 @@ class R3FErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    // Log the error for local console debugging
     console.error("R3F Component Error Caught:", error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
-      // Fallback UI to replace the blank screen
       return (
         <div 
           className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-red-950/90 text-red-300 font-mono p-10"
@@ -41,13 +49,13 @@ class R3FErrorBoundary extends Component {
           <h1 className="text-xl font-bold text-yellow-400">CRITICAL KERNEL ERROR (WebGL/Dependency)</h1>
           <p className="mt-4 text-center text-sm">
             A fatal rendering error occurred inside the 3D view. 
-            This often indicates a **dependency conflict** (like the `three-mesh-bvh` warning) or WebGL failure on this device.
+            This often indicates a **WebGL failure** on this device.
           </p>
           <pre className="mt-4 p-3 bg-red-800/50 rounded text-xs overflow-auto max-w-full">
             {this.state.error ? this.state.error.toString() : "Unknown Error - Check Console Logs"}
           </pre>
           <p className="mt-4 text-xs text-lime-400">
-            **Action Required:** Please run `npm update` or manually update your `three-mesh-bvh` dependency and redeploy.
+            **Action Required:** If this persists, try viewing the app in a different, modern browser (Chrome, Safari, Firefox).
           </p>
         </div>
       );
@@ -132,11 +140,9 @@ function ManifoldConstraintLayer() {
 }
 
 // 1. The GΛLYPH NODE Component
-// Now accepts 'isSelected' and 'onSelect' props
 function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
   const meshRef = useRef()
   
-  // FIX: Recalculate texture only when name or color changes, and initialize it inside the callback
   const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
@@ -172,7 +178,6 @@ function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
       {/* Icosahedron Mesh - The Glyptic Core */}
       <mesh ref={meshRef}>
         <icosahedronGeometry args={[0.4, 0]} /> 
-        {/* We use MeshBasicMaterial and let useFrame handle color changes */}
         <meshBasicMaterial color={color} wireframe /> 
       </mesh>
       
@@ -209,7 +214,7 @@ function BackgroundSpawner({ onSpawn }) {
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
-  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set()); // New state for tracking selected nodes
+  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set()); 
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [db, setDb] = useState(null);
@@ -224,9 +229,9 @@ export default function App() {
     setSelectedNodeIds(prevSelected => {
       const newSet = new Set(prevSelected);
       if (newSet.has(nodeId)) {
-        newSet.delete(nodeId); // Deselect
+        newSet.delete(nodeId); 
       } else {
-        newSet.add(nodeId); // Select
+        newSet.add(nodeId); 
       }
       return newSet;
     });
@@ -325,7 +330,7 @@ export default function App() {
         console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
       } else {
         // Document doesn't exist, initialize it:
-        // 1. Set local state immediately for visual feedback (THE FIX)
+        // 1. Set local state immediately for visual feedback
         setNodes(INITIAL_SYSTEM_STATE.nodes);
         setConstraints(INITIAL_SYSTEM_STATE.constraints);
         
@@ -345,7 +350,7 @@ export default function App() {
   }, [db, authReady]);
   
   
-  // --- RAG INGESTION HANDLER (Adds next artifact from the predefined list) ---
+  // --- RAG INGESTION HANDLER ---
   const handleRAGIngestion = useCallback(async () => {
     // Guard clause to prevent execution before setup is complete
     if (!isReady) {
@@ -355,18 +360,15 @@ export default function App() {
 
     const artifact = RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length];
     
-    // Create new node object
     const newNode = {
       id: artifact.name.replace(/\s/g, '-').toLowerCase(),
       name: artifact.name,
       color: artifact.color,
-      // Use the predefined position from the RAG_ARTIFACTS list
       position: artifact.pos, 
       type: artifact.type,
       timestamp: Date.now()
     };
 
-    // Create new constraint objects linking to the Axiomatic foundations
     const newConstraints = artifact.links.map(linkId => ([
       newNode.id, linkId, newNode.color 
     ]));
@@ -377,15 +379,13 @@ export default function App() {
       const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
       const docRef = doc(db, docPath);
 
-      // Ensure no duplicate nodes are added (by ID), then append the new node.
       const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
-      // Append new constraints
       const allConstraints = [...constraints, ...newConstraints];
 
       await setDoc(docRef, {
         nodes: uniqueNodes,
         constraints: allConstraints
-      }, { merge: false }); // Overwrite the arrays completely with the new set
+      }, { merge: false }); 
 
       setRagIndex(i => i + 1);
       console.log(`Ingested new RAG artifact: ${newNode.name}`);
@@ -409,7 +409,7 @@ export default function App() {
       timestamp: Date.now()
     }
     
-    // Link new node to a random existing axiomatic node (rag-orch, glyph-eng, vgm-anchor, manifold, hax)
+    // Link new node to a random existing axiomatic node
     const axiomaticIds = INITIAL_SYSTEM_STATE.nodes.map(n => n.id);
     const existingNodeId = axiomaticIds[Math.floor(Math.random() * axiomaticIds.length)];
     const newConstraint = [newId, existingNodeId, 'white']; 
@@ -437,7 +437,6 @@ export default function App() {
 
   // Utility to find node position by ID
   const nodeMap = useMemo(() => {
-    // Map node ID to its position vector [x, y, z]
     return new Map(nodes.map(node => [node.id, node.position]));
   }, [nodes]);
 
@@ -470,8 +469,7 @@ export default function App() {
 
   return (
     <div 
-      // TEMPORARY DEBUGGING STEP: Change background to red
-      className="w-screen bg-red-900" 
+      className="w-screen bg-gray-950" 
       style={{ height: '100dvh' }} 
     > 
       {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
@@ -520,7 +518,7 @@ export default function App() {
         <p className="text-sm mb-2 text-lime-300">RAG Pipeline Control (Simulate Ingestion)</p>
         <button 
           onClick={handleRAGIngestion}
-          disabled={!isReady} // Disable button until ready
+          disabled={!isReady} 
           className={`px-4 py-2 transition duration-150 rounded-full text-white font-bold text-lg shadow-xl ${
             isReady 
               ? 'bg-indigo-700 hover:bg-indigo-600' 
@@ -573,12 +571,12 @@ export default function App() {
           {nodes.map(node => (
             <GlyphNode 
               key={node.id} 
-              id={node.id} // Pass ID for selection
+              id={node.id} 
               position={node.position} 
               color={node.color} 
               name={node.name}
-              isSelected={selectedNodeIds.has(node.id)} // Pass selection status
-              onSelect={handleNodeSelect} // Pass selection handler
+              isSelected={selectedNodeIds.has(node.id)} 
+              onSelect={handleNodeSelect} 
             />
           ))}
 
