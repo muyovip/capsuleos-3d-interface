@@ -103,9 +103,7 @@ function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
         const highlightColor = new THREE.Color(0xffffff);
         meshRef.current.material.color.lerpColors(baseColor, highlightColor, pulse * 0.2);
       } else {
-        // Ensure the color is reset when deselected
-        const baseColor = new THREE.Color(color);
-        meshRef.current.material.color.lerp(baseColor, 0.1);
+        meshRef.current.material.color.set(color);
       }
     }
   })
@@ -117,9 +115,9 @@ function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
   }, [id, onSelect]);
 
   return (
-    <group position={position}>
-      {/* Icosahedron Mesh - The Glyptic Core - onClick is attached to the mesh for reliable raycasting */}
-      <mesh ref={meshRef} onClick={handleClick}>
+    <group position={position} onClick={handleClick}>
+      {/* Icosahedron Mesh - The Glyptic Core */}
+      <mesh ref={meshRef}>
         <icosahedronGeometry args={[0.4, 0]} /> 
         {/* We use MeshBasicMaterial and let useFrame handle color changes */}
         <meshBasicMaterial color={color} wireframe /> 
@@ -156,9 +154,12 @@ function BackgroundSpawner({ onSpawn }) {
 
 // 3. Main Application 
 export default function App() {
-  const [nodes, setNodes] = useState([])
-  const [constraints, setConstraints] = useState([])
-  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set()); // New state for tracking selected nodes
+  // --- FIX APPLIED HERE: Initialize with Axiomatic Data ---
+  // This ensures the Canvas renders geometry immediately, preventing the black screen.
+  const [nodes, setNodes] = useState(INITIAL_SYSTEM_STATE.nodes);
+  const [constraints, setConstraints] = useState(INITIAL_SYSTEM_STATE.constraints);
+  
+  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set()); 
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [db, setDb] = useState(null);
@@ -190,89 +191,58 @@ export default function App() {
   // --- 1. FIREBASE INITIALIZATION AND AUTH ---
   useEffect(() => {
     let authListener;
-    let authTimeout; // To ensure loading is set to false even on delays
+    try {
+      const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+      if (Object.keys(firebaseConfig).length === 0) {
+        console.error("Firebase config is missing. Displaying initial state, persistence disabled.");
+        setLoading(false);
+        // We no longer need to call setNodes/setConstraints here, as useState already did it.
+        return;
+      }
+      
+      const app = initializeApp(firebaseConfig);
+      const firestore = getFirestore(app);
+      const auth = getAuth(app);
 
-    const startApp = async () => {
-      try {
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        
-        if (Object.keys(firebaseConfig).length === 0) {
-          console.error("Firebase config is missing. Displaying initial state, persistence disabled.");
-          setNodes(INITIAL_SYSTEM_STATE.nodes);
-          setConstraints(INITIAL_SYSTEM_STATE.constraints);
-          setLoading(false); // Immediate exit from loading
-          setAuthReady(true);
-          return;
-        }
-        
-        const app = initializeApp(firebaseConfig);
-        const firestore = getFirestore(app);
-        const auth = getAuth(app);
+      setDb(firestore);
 
-        setDb(firestore);
-
-        const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-        
-        // Handle authentication state change
-        const handleAuth = (user) => {
-          if (user) {
-            setUserId(user.uid);
-            console.log("Authenticated with UID:", user.uid);
-          } else {
-            // Fallback: If no user is signed in, sign in anonymously
-            signInAnonymously(auth).then(anonUser => {
-              setUserId(anonUser.user.uid);
-              console.log("Signed in anonymously with UID:", anonUser.user.uid);
-            }).catch(e => {
-              console.error("Anonymous sign-in failed:", e);
-              // CRITICAL: If sign-in fails, still set authReady and stop loading
-              setLoading(false);
-            });
-          }
-          setAuthReady(true);
-          // The loading state should ideally be resolved by the Firestore listener, 
-          // but we set a fallback here too just in case.
-        };
-
-        // Start listening for auth state changes
-        authListener = onAuthStateChanged(auth, handleAuth);
-
-        // Attempt custom token sign-in first if token exists
-        if (token) {
-          signInWithCustomToken(auth, token).catch(e => {
-            // If custom token fails, the onAuthStateChanged listener will handle it 
-            // by falling back to anonymous sign-in or marking authReady.
-            console.error("Custom token sign-in failed. Falling back to onAuthStateChanged.", e);
+      const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+      
+      // Handle authentication state change
+      const handleAuth = (user) => {
+        if (user) {
+          setUserId(user.uid);
+          console.log("Authenticated with UID:", user.uid);
+        } else {
+          // If no user is signed in, sign in anonymously
+          signInAnonymously(auth).then(anonUser => {
+            setUserId(anonUser.user.uid);
+            console.log("Signed in anonymously with UID:", anonUser.user.uid);
+          }).catch(e => {
+            console.error("Anonymous sign-in failed:", e);
           });
         }
-        
-        // Safety timeout: If everything takes too long, stop loading after 5 seconds
-        authTimeout = setTimeout(() => {
-            console.warn("Auth process timed out. Forcing loading state off.");
-            if (!auth.currentUser) {
-                // If we timed out and still aren't authenticated, use a dummy ID 
-                // and proceed to the Firestore effect.
-                setUserId(crypto.randomUUID());
-            }
-            setAuthReady(true);
-            setLoading(false); 
-        }, 5000); // 5 seconds
-        
-      } catch (e) {
-        console.error("Firebase setup failed:", e);
-        setNodes(INITIAL_SYSTEM_STATE.nodes);
-        setConstraints(INITIAL_SYSTEM_STATE.constraints);
-        setLoading(false); // CRITICAL: Stop loading on any setup failure
         setAuthReady(true);
-      }
-    };
-    
-    startApp();
+      };
 
-    // Cleanup the listeners and timeout on unmount
+      authListener = onAuthStateChanged(auth, handleAuth);
+
+      // Attempt custom token sign-in first if token exists
+      if (token) {
+        signInWithCustomToken(auth, token).catch(e => {
+          // If custom token fails, onAuthStateChanged fallback will handle it
+          console.error("Custom token sign-in failed. Falling back to onAuthStateChanged.", e);
+        });
+      }
+
+    } catch (e) {
+      console.error("Firebase setup failed:", e);
+      setLoading(false);
+    }
+    
+    // Cleanup the auth listener on unmount
     return () => {
       if (authListener) authListener();
-      if (authTimeout) clearTimeout(authTimeout);
     };
   }, []);
 
@@ -304,26 +274,23 @@ export default function App() {
         console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
       } else {
         // Document doesn't exist, initialize it:
-        setNodes(INITIAL_SYSTEM_STATE.nodes);
-        setConstraints(INITIAL_SYSTEM_STATE.constraints);
-        
-        // Initialize the document in Firestore
+        // Local state is already set by useState, so we just initialize the Firestore document.
         initializeState(); 
         
-        console.log("Document missing. Initializing local state and writing to Firestore.");
+        console.log("Document missing. Initializing Firestore document.");
       }
       // Data is either successfully retrieved or initialization is triggered, so stop loading
       setLoading(false); 
     }, (error) => {
       console.error("Firestore snapshot failed:", error);
-      // CRITICAL: Stop loading on Firestore error
+      // Even if snapshot fails, the initial state is already rendered due to the fix.
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [db, authReady]); // Depend on db and authReady
-
-
+  }, [db, authReady]);
+  
+  
   // --- RAG INGESTION HANDLER (Adds next artifact from the predefined list) ---
   const handleRAGIngestion = useCallback(async () => {
     // Guard clause to prevent execution before setup is complete
