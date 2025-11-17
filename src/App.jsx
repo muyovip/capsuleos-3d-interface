@@ -82,47 +82,24 @@ function ManifoldConstraintLayer() {
 }
 
 // 1. The GΛLYPH NODE Component
-// Now accepts 'isSelected' and 'onSelect' props
-function GlyphNode({ id, position, color, name, isSelected, onSelect }) {
+function GlyphNode({ position, color, name, onClick }) {
   const meshRef = useRef()
   const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
     if (meshRef.current) {
-      // Base rotation
+      // Faster, pulsing rotation
       meshRef.current.rotation.x += delta * 0.2
       meshRef.current.rotation.y += delta * 0.1
-      
-      // Visual feedback for selection
-      const scaleFactor = isSelected ? 1.5 : 1.0;
-      // Using meshRef.current.scale.set() for an immediate change when selected
-      meshRef.current.scale.lerp(new THREE.Vector3(scaleFactor, scaleFactor, scaleFactor), 0.1);
-
-      // Add a subtle color pulse when selected
-      if (isSelected) {
-        const pulse = Math.sin(state.clock.elapsedTime * 8) * 0.1 + 0.9;
-        const baseColor = new THREE.Color(color);
-        const highlightColor = new THREE.Color(0xffffff);
-        meshRef.current.material.color.lerpColors(baseColor, highlightColor, pulse * 0.2);
-      } else {
-        meshRef.current.material.color.set(color);
-      }
     }
   })
 
-  // Click handler
-  const handleClick = useCallback((e) => {
-    e.stopPropagation(); // Prevent background click/spawn
-    onSelect(id);
-  }, [id, onSelect]);
-
   return (
-    <group position={position} onClick={handleClick}>
+    <group position={position} onClick={onClick}>
       {/* Icosahedron Mesh - The Glyptic Core */}
       <mesh ref={meshRef}>
         <icosahedronGeometry args={[0.4, 0]} /> 
-        {/* We use MeshBasicMaterial and let useFrame handle color changes */}
-        <meshBasicMaterial color={color} wireframe /> 
+        <meshBasicMaterial color={color} wireframe />
       </mesh>
       
       {/* Text Mesh using Canvas Texture - The Identity Layer */}
@@ -158,7 +135,6 @@ function BackgroundSpawner({ onSpawn }) {
 export default function App() {
   const [nodes, setNodes] = useState([])
   const [constraints, setConstraints] = useState([])
-  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set()); 
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [db, setDb] = useState(null);
@@ -168,36 +144,16 @@ export default function App() {
   // Derive readiness state for the button
   const isReady = db && userId && !loading;
 
-  // --- NODE SELECTION HANDLER (STEP 1: Vector Core Accessible) ---
-  const handleNodeSelect = useCallback((nodeId) => {
-    setSelectedNodeIds(prevSelected => {
-      const newSet = new Set(prevSelected);
-      if (newSet.has(nodeId)) {
-        newSet.delete(nodeId); // Deselect
-      } else {
-        newSet.add(nodeId); // Select
-      }
-      return newSet;
-    });
-  }, []);
-
-  // Get selected node objects for display in the CEX view
-  const selectedNodes = useMemo(() => {
-    return nodes.filter(node => selectedNodeIds.has(node.id));
-  }, [nodes, selectedNodeIds]);
-
-
-  // --- 1. FIREBASE INITIALIZATION AND AUTH (CRITICAL FIX APPLIED HERE) ---
+  // --- 1. FIREBASE INITIALIZATION AND AUTH ---
   useEffect(() => {
     let authListener;
-    
     try {
       const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
       if (Object.keys(firebaseConfig).length === 0) {
         console.error("Firebase config is missing. Displaying initial state, persistence disabled.");
+        setLoading(false);
         setNodes(INITIAL_SYSTEM_STATE.nodes);
         setConstraints(INITIAL_SYSTEM_STATE.constraints);
-        setLoading(false); // Immediate fallback rendering
         return;
       }
       
@@ -209,7 +165,7 @@ export default function App() {
 
       const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
       
-      // Handle authentication state change - THIS IS THE CRITICAL PATH
+      // Handle authentication state change
       const handleAuth = (user) => {
         if (user) {
           setUserId(user.uid);
@@ -224,8 +180,6 @@ export default function App() {
           });
         }
         setAuthReady(true);
-        // FIX: Ensure loading state is dropped here, as auth process is complete.
-        setLoading(false); 
       };
 
       authListener = onAuthStateChanged(auth, handleAuth);
@@ -240,7 +194,7 @@ export default function App() {
 
     } catch (e) {
       console.error("Firebase setup failed:", e);
-      setLoading(false); // Ensure this is called on a synchronous error
+      setLoading(false);
     }
     
     // Cleanup the auth listener on unmount
@@ -277,7 +231,7 @@ export default function App() {
         console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
       } else {
         // Document doesn't exist, initialize it:
-        // 1. Set local state immediately for visual feedback
+        // 1. Set local state immediately for visual feedback (THE FIX)
         setNodes(INITIAL_SYSTEM_STATE.nodes);
         setConstraints(INITIAL_SYSTEM_STATE.constraints);
         
@@ -286,8 +240,11 @@ export default function App() {
         
         console.log("Document missing. Initializing local state and writing to Firestore.");
       }
+      // Data is either successfully retrieved or initialization is triggered, so stop loading
+      setLoading(false); 
     }, (error) => {
       console.error("Firestore snapshot failed:", error);
+      setLoading(false);
     });
 
     return () => unsubscribe();
@@ -341,7 +298,7 @@ export default function App() {
     } catch (e) {
       console.error("Error injecting RAG artifact:", e);
     }
-  }, [db, nodes, constraints, isReady, ragIndex]);
+  }, [db, userId, nodes, constraints, isReady, ragIndex]);
 
 
   // HIL Input Handler (Spawning new nodes via user click)
@@ -381,7 +338,7 @@ export default function App() {
     } catch (e) {
         console.error("Error spawning node:", e);
     }
-  }, [db, nodes, constraints, isReady]);
+  }, [db, userId, nodes, constraints, isReady]);
 
 
   // Utility to find node position by ID
@@ -409,11 +366,10 @@ export default function App() {
   if (loading) {
     return (
       <div 
-        className="w-screen bg-gray-950 flex items-center justify-center text-xl font-mono" 
+        className="w-screen bg-gray-950 flex items-center justify-center text-lime-400 font-mono" 
         style={{ height: '100dvh' }}
       >
-        {/* IMPROVEMENT: Changed text color to a brighter cyan for visibility against black */}
-        <p className="text-cyan-400">Axiomatic Core Bootstrapping... (Authenticating/Loading Data Grid)</p>
+        <p>Axiomatic Core Bootstrapping... (Authenticating/Loading Data Grid)</p>
       </div>
     );
   }
@@ -438,22 +394,6 @@ export default function App() {
         <br/>User ID: <span className="text-yellow-400 break-words">{userId || "N/A"}</span>
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
         <br/>Status: {isReady ? 'Persistent Grid Locked' : <span className="text-red-400">Syncing...</span>}
-        
-        {/* Vector Core Input Display */}
-        <div className="mt-3 pt-2 border-t border-lime-700">
-            <p className="text-cyan-400 font-bold mb-1">Vector Core Input ($\mathbf{x}$):</p>
-            {selectedNodes.length === 0 ? (
-                <p className="text-gray-400 text-xs italic">Click nodes to build the execution vector.</p>
-            ) : (
-                <ul className="list-disc list-inside text-sm">
-                    {selectedNodes.map(node => (
-                        <li key={node.id} className="text-white" style={{color: node.color}}>
-                            {node.name} <span className="text-gray-500 text-xs">({node.id})</span>
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </div>
       </div>
 
       {/* RAG Injection Control Panel (Bottom Right) */}
@@ -521,12 +461,10 @@ export default function App() {
         {nodes.map(node => (
           <GlyphNode 
             key={node.id} 
-            id={node.id} // Pass ID for selection
             position={node.position} 
             color={node.color} 
             name={node.name}
-            isSelected={selectedNodeIds.has(node.id)} // Pass selection status
-            onSelect={handleNodeSelect} // Pass selection handler
+            onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
           />
         ))}
 
@@ -548,4 +486,3 @@ export default function App() {
     </div>
   )
 }
-
