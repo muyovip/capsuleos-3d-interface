@@ -16,15 +16,16 @@ const CAMERA_FOV = 60;
 
 // Base camera distances used by ResponsiveCamera
 const LANDSCAPE_Z = 25; 
-const PORTRAIT_Z = 70; // FIXED: Adjusted from 160 to 70 for better mobile visibility/raycasting
-const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // Now 70 / 25 = 2.8
-// Scaling fix
-const FINAL_SMALL_SCALE = 1 / Z_RATIO; 
+const PORTRAIT_Z = 160; // REVERTED: Back to 160 for desired small aesthetic
+const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // ~6.4
 
 // Geometric size constants. 
 const BASE_NODE_RADIUS = 3.0;
 const BASE_LABEL_SIZE = 1.5;
 const BASE_LINE_WIDTH = 4.0;
+
+// Scaling fix
+const FINAL_SMALL_SCALE = 1 / Z_RATIO; 
 
 // Firestore collection path for shared Axiomatic Nodes
 const AXIOM_NODE_COLLECTION_NAME = 'axiom_nodes';
@@ -83,7 +84,7 @@ function ResponsiveCamera({ setAspect, isTerminalOpen }) {
       minDistance={5} 
       maxDistance={200}
       enablePan={false}
-      // FIX: Disable controls when the terminal is open
+      // Disable controls when the terminal is open
       enabled={!isTerminalOpen} 
     />
   );
@@ -221,16 +222,18 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
     }
   })
 
-  // IMPORTANT: Clicks on R3F objects are raycast events, they fire reliably.
   const handleClick = useCallback((e) => {
-    // Stop propagation so the raycast doesn't register a hit on other objects behind this one,
-    // although for the terminal, the key is preventing OrbitControls interference.
     e.stopPropagation(); 
-    onSelect(id); // Calls the function to open the terminal
+    onSelect(id); 
   }, [id, onSelect]);
 
   return (
-    <group position={position} onClick={handleClick}>
+    <group 
+      position={position} 
+      onClick={handleClick}
+      onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
+      onPointerOut={(e) => { e.stopPropagation(); document.body.style.cursor = 'default'; }}
+    >
       
       {/* 1. Wireframe Icosahedron */}
       <mesh ref={meshRef}>
@@ -238,9 +241,9 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
         <meshBasicMaterial color={color} wireframe thickness={0.15 * orientationScale} />
       </mesh>
       
-      {/* 2. Transparent Sphere (Click target) - Ensures a slightly larger hit area */}
+      {/* 2. Transparent Sphere (Click target) - Significantly larger for easier clicks */}
       <mesh>
-        <sphereGeometry args={[nodeScale * 1.1, 16, 16]} />
+        <sphereGeometry args={[nodeScale * 5, 16, 16]} /> {/* Increased radius to 5x nodeScale */}
         <meshBasicMaterial color={color} transparent opacity={0.0} /> 
       </mesh>
       
@@ -472,6 +475,7 @@ export default function App() {
         height: '100vh',
         height: '100lvh', 
         height: '100svh', 
+        // Cursor changes when terminal is open or hovering a node
         cursor: selectedNodeId ? 'default' : 'pointer'
       }} 
       className="bg-black overflow-hidden touch-none"
@@ -490,6 +494,7 @@ export default function App() {
       
       {/* 3D Canvas */}
       <Canvas dpr={[1, 2]} camera={{ fov: CAMERA_FOV }}>
+        {/* Pass isTerminalOpen to disable controls when terminal is active */}
         <ResponsiveCamera setAspect={setAspect} isTerminalOpen={!!selectedNodeId} />
         
         <ParticlePlanet />
