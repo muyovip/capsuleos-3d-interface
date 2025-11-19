@@ -6,18 +6,18 @@ import * as THREE from 'three'
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, onSnapshot, collection, query, setDoc } from 'firebase/firestore';
+import { getFirestore, doc, onSnapshot, collection, setDoc } from 'firebase/firestore';
 
 // --- CONFIGURATION ---
 const PARTICLE_COUNT_INNER = 15000;
 const PARTICLE_COUNT_OUTER = 35000;
-const MAX_GALAXY_RADIUS = 45; // Galaxy width is 90 units
+const MAX_GALAXY_RADIUS = 45; 
 const CAMERA_FOV = 60;
 
 // Base camera distances used by ResponsiveCamera
 const LANDSCAPE_Z = 25; 
-const PORTRAIT_Z = 160; // REVERTED: Back to 160 for desired small aesthetic
-const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // ~6.4
+const PORTRAIT_Z = 160; 
+const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; 
 
 // Geometric size constants. 
 const BASE_NODE_RADIUS = 3.0;
@@ -34,7 +34,6 @@ const AXIOM_NODE_COLLECTION_NAME = 'axiom_nodes';
 // --- AXIOMATIC DATA (Used as a fallback/initial structure) ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
-    // These now serve as an initial structure, waiting for Firestore data to replace them
     { id: 'rag-orch', name: 'Multi-Agent RAG', color: '#00ffff', position: [3.5, 1.0, 0] },
     { id: 'glyph-eng', name: 'GΛLYPH Engine', color: '#32cd32', position: [-3.5, 1.0, 0] },
     { id: 'vgm-anchor', name: 'VGM Anchor', color: '#00ffff', position: [0, 4.0, -2.0] },
@@ -226,6 +225,9 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
     e.stopPropagation(); 
     onSelect(id); 
   }, [id, onSelect]);
+  
+  // Text will be rendered slightly forward (small Z offset) and with high renderOrder
+  const textPosition = [0, nodeScale + 0.3, 0.1 * orientationScale]; 
 
   return (
     <group 
@@ -235,20 +237,20 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
       onPointerOut={(e) => { e.stopPropagation(); document.body.style.cursor = 'default'; }}
     >
       
-      {/* 1. Wireframe Icosahedron */}
-      <mesh ref={meshRef}>
+      {/* 1. Transparent Sphere (Click target) - Rendered FIRST (order 0) so lines/mesh are on top */}
+      <mesh renderOrder={0}>
+        <sphereGeometry args={[nodeScale * 5, 16, 16]} /> 
+        <meshBasicMaterial color={color} transparent opacity={0.0} /> 
+      </mesh>
+      
+      {/* 2. Wireframe Icosahedron - Rendered SECOND (order 1) */}
+      <mesh ref={meshRef} renderOrder={1}>
         <icosahedronGeometry args={[nodeScale, 0]} /> 
         <meshBasicMaterial color={color} wireframe thickness={0.15 * orientationScale} />
       </mesh>
       
-      {/* 2. Transparent Sphere (Click target) - Significantly larger for easier clicks */}
-      <mesh>
-        <sphereGeometry args={[nodeScale * 5, 16, 16]} /> {/* Increased radius to 5x nodeScale */}
-        <meshBasicMaterial color={color} transparent opacity={0.0} /> 
-      </mesh>
-      
-      {/* 3. Text Label */}
-      <group position={[0, nodeScale + 0.3, 0]}>
+      {/* 3. Text Label - Rendered LAST (order 2) for maximum visibility */}
+      <group position={textPosition} renderOrder={2}>
          <Text
             fontSize={labelScale}
             color="white"
@@ -256,6 +258,7 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
             anchorY="middle"
             outlineWidth={0.03}
             outlineColor="black"
+            // depthTest=false helps keep the text visible
             depthTest={false} 
           >
             {name}
@@ -274,14 +277,15 @@ function TerminalOverlay({ selectedNodeId, closeTerminal, nodes }) {
   const color = node ? node.color : "cyan";
 
   return (
+    // Click on the background to close the terminal and unfreeze the camera
     <div 
       className="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm flex items-center justify-center p-4 z-50 transition-opacity duration-300"
-      onClick={closeTerminal} // Close when clicking outside the terminal window
+      onClick={closeTerminal} 
     >
       <div 
         className="w-full max-w-2xl h-full max-h-[80vh] bg-gray-900 border-2 shadow-2xl rounded-xl flex flex-col"
         style={{ borderColor: color, boxShadow: `0 0 20px ${color}` }}
-        onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside
+        onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside the window
       >
         {/* Header */}
         <div className="p-3 border-b" style={{ borderColor: color }}>
@@ -290,9 +294,10 @@ function TerminalOverlay({ selectedNodeId, closeTerminal, nodes }) {
               {`[ ${title} ] :: AX-INTERFACE >_`}
             </h2>
             <button 
-              onClick={closeTerminal} 
+              onClick={closeTerminal} // This button now correctly calls closeTerminal
               className="text-white hover:text-red-500 transition-colors p-1 rounded"
             >
+              {/* Corrected SVG for close button */}
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
@@ -303,13 +308,22 @@ function TerminalOverlay({ selectedNodeId, closeTerminal, nodes }) {
           <p className="pb-4 text-cyan-400">
             --- Initiating RAG Context for **{title}** ---
           </p>
-          <p className="text-gray-400">
-            > Status: Awaiting command...
-          </p>
+          {
+            // Placeholder for data from CapsuleOS / Hoi-Poi
+            // This is where the actual RAG-derived content would load.
+            node ? (
+              <p className="text-gray-400">
+                > **AX-ID:** {node.id} <br/>
+                > **Status:** Synced. Awaiting command for content retrieval. <br/>
+                > **Memory:** This node currently holds meta-data about the core `{title}` system component.
+              </p>
+            ) : (
+              <p className="text-red-400">> ERROR: Node data not found.</p>
+            )
+          }
           <p>
             > Access granted. Welcome, Agent.
           </p>
-          {/* Add more dynamic chat history here */}
         </div>
 
         {/* Input Area */}
@@ -323,6 +337,8 @@ function TerminalOverlay({ selectedNodeId, closeTerminal, nodes }) {
               caretColor: color,
               boxShadow: `0 0 5px ${color}` 
             }}
+            // Focus here to allow immediate typing
+            autoFocus 
           />
         </div>
       </div>
@@ -346,7 +362,6 @@ export default function App() {
   // 1. FIREBASE INITIALIZATION AND AUTHENTICATION
   useEffect(() => {
     try {
-      // Accessing global variables provided by the canvas environment
       const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
       const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
 
@@ -362,7 +377,6 @@ export default function App() {
       setDb(firestore);
       setAuth(authentication);
 
-      // Sign in using custom token or anonymously
       const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
       
       onAuthStateChanged(authentication, (user) => {
@@ -370,7 +384,6 @@ export default function App() {
           setUserId(user.uid);
           console.log(`Authenticated as User ID: ${user.uid}`);
         } else if (!token) {
-          // If no token, sign in anonymously
           signInAnonymously(authentication)
             .then(anonUser => {
               setUserId(anonUser.user.uid);
@@ -401,13 +414,10 @@ export default function App() {
     
     console.log(`Listening to public collection: ${collectionPath}`);
 
-    // Set up the real-time listener
     const unsubscribe = onSnapshot(nodesRef, (snapshot) => {
       const newNodes = [];
       snapshot.forEach(doc => {
-        // Data format: {id, name, color, position: [x, y, z]}
         const data = doc.data();
-        // Ensure position is an array for three.js
         if (data.position && Array.isArray(data.position) && data.position.length === 3) {
           newNodes.push({
             id: doc.id,
@@ -416,31 +426,32 @@ export default function App() {
         }
       });
 
-      // If Firestore is empty, we fall back to the initial local state
+      // If Firestore is empty, we fall back to the initial local state AND seed the database
       if (newNodes.length > 0) {
         setNodes(newNodes);
       } else {
-        // Optionally, seed the database with initial nodes if it's empty
         INITIAL_SYSTEM_STATE.nodes.forEach(node => {
+          // Use a simple, non-async setDoc for seeding, assuming the Firestore instance is ready.
           setDoc(doc(db, collectionPath, node.id), node).catch(e => console.error("Error seeding node:", e));
         });
         setNodes(INITIAL_SYSTEM_STATE.nodes);
       }
     }, (error) => {
       console.error("Firestore onSnapshot failed:", error);
-      // Fallback to local state on error
       setNodes(INITIAL_SYSTEM_STATE.nodes);
     });
 
-    // Cleanup function
     return () => unsubscribe();
-  }, [db, userId]); // Re-run when database instance or user auth state changes
+  }, [db, userId]); 
 
-  // Click Handler for Nodes
+  // Click Handler for Nodes (opens terminal)
   const handleNodeSelect = useCallback((id) => {
-    setSelectedNodeId(id); // Open the terminal overlay
+    setSelectedNodeId(id); 
+    // Remove pointer cursor when terminal opens
+    document.body.style.cursor = 'default';
   }, []);
 
+  // Closes terminal and restores camera movement
   const closeTerminal = useCallback(() => {
     setSelectedNodeId(null);
   }, []);
@@ -465,6 +476,9 @@ export default function App() {
 
   const orientationScale = FINAL_SMALL_SCALE;
   const dynamicLineWidth = BASE_LINE_WIDTH * orientationScale;
+  
+  // Determine if the canvas should receive pointer events (i.e., if controls should work)
+  const canvasPointerEvents = selectedNodeId ? 'none' : 'auto';
 
   return (
     <div 
@@ -475,8 +489,7 @@ export default function App() {
         height: '100vh',
         height: '100lvh', 
         height: '100svh', 
-        // Cursor changes when terminal is open or hovering a node
-        cursor: selectedNodeId ? 'default' : 'pointer'
+        cursor: selectedNodeId ? 'default' : 'auto'
       }} 
       className="bg-black overflow-hidden touch-none"
     >
@@ -487,27 +500,23 @@ export default function App() {
         textShadow: '0 0 10px cyan'
       }} className="hidden sm:block">
         CAPSULE OS | **DEX View** <br/>
-        Status: IMMERSION LOCK <br/>
+        Status: {db ? 'Axiomatic Sync' : 'Initializing...'} <br/>
         User ID: {userId ? userId.substring(0, 10) + '...' + userId.substring(userId.length - 4) : 'Loading...'} <br/>
         Total Nodes: {nodes.length}
       </div>
       
       {/* 3D Canvas */}
-      <Canvas dpr={[1, 2]} camera={{ fov: CAMERA_FOV }}>
-        {/* Pass isTerminalOpen to disable controls when terminal is active */}
+      <Canvas 
+        dpr={[1, 2]} 
+        camera={{ fov: CAMERA_FOV }}
+        // Control pointer events to ensure the overlay doesn't interfere with the canvas
+        style={{ pointerEvents: canvasPointerEvents }} 
+      >
         <ResponsiveCamera setAspect={setAspect} isTerminalOpen={!!selectedNodeId} />
         
         <ParticlePlanet />
 
-        {nodes.map(node => (
-          <GlyphNode 
-            key={node.id}
-            {...node}
-            onSelect={handleNodeSelect}
-            orientationScale={orientationScale} 
-          />
-        ))}
-
+        {/* Lines must be rendered *before* the nodes (renderOrder 1) */}
         {linePoints.map((l, i) => (
           <Line 
             key={i} 
@@ -516,8 +525,20 @@ export default function App() {
             lineWidth={dynamicLineWidth} 
             transparent 
             opacity={0.5} 
+            renderOrder={1}
           />
         ))}
+
+        {/* Nodes must be rendered after lines, ensuring their click targets don't cover the lines */}
+        {nodes.map(node => (
+          <GlyphNode 
+            key={node.id}
+            {...node}
+            onSelect={handleNodeSelect}
+            orientationScale={orientationScale} 
+          />
+        ))}
+        
       </Canvas>
       
       {/* Terminal Interface Overlay */}
