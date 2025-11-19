@@ -1,633 +1,555 @@
-import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, Line } from '@react-three/drei' 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import * as THREE from 'three'
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Canvas, useThree, useFrame, extend } from '@react-three/fiber';
+import { OrbitControls, Line } from '@react-three/drei';
+import * as THREE from 'three';
 
-// --- FIREBASE IMPORTS ---
+// Import Firebase components
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { setLogLevel } from 'firebase/firestore';
+import { 
+  getFirestore, 
+  doc, 
+  onSnapshot, 
+  collection, 
+  query, 
+  setDoc,
+  getDocs
+} from 'firebase/firestore';
 
-// Enable Firestore debug logging
-setLogLevel('debug');
+// Extend LineGeometry and LineMaterial for Line component
+// This is necessary because react-three-fiber's Line is a wrapper around a specific Three.js implementation.
+extend({ OrbitControls });
 
-// --- AXIOMATIC DATA ---
-const INITIAL_SYSTEM_STATE = {
-  nodes: [
-    { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0], initial: true },
-    { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.0, 1.0, 0], initial: true },
-    { id: 'vgm-anchor', name: 'VGM Anchor', color: 'cyan', position: [0, 2.5, -1.5], initial: true },
-    { id: 'manifold', name: 'Manifold Constraint', color: 'lime', position: [0, -2.5, 1.5], initial: true },
-    { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [3, -0.5, -0.5], initial: true },
-  ],
-  constraints: [
-    ['rag-orch', 'glyph-eng', 'lime'],
-    ['rag-orch', 'vgm-anchor', 'cyan'],
-    ['glyph-eng', 'manifold', 'lime'],
-    ['vgm-anchor', 'hax', 'orange'],
-    ['manifold', 'hax', 'orange'],
-  ],
-};
+// --- Global Variables (Provided by Canvas Environment) ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// --- RAG INGESTION ARTIFACTS ---
-const RAG_ARTIFACTS = [
-    { name: "Regenesis Dystopia", color: "red", type: "RAG-Synthesis", pos: [-3, -4, 2], links: ['rag-orch', 'glyph-eng'] },
-    { name: "QLM-NFT Protocol", color: "purple", type: "VGM-Output", pos: [4, 3, -1], links: ['vgm-anchor', 'hax'] },
-    { name: "Nico Robin Agent", color: "yellow", type: "HIL-Agent", pos: [-1, 4, 3], links: ['hax', 'manifold'] }
-];
+// --- Firebase Initialization and Context ---
+let app;
+let db;
+let auth;
 
-// Helper function to create a texture with text on it (Absolute Fidelity)
-function createTextTexture(text, color, fontSize = 64) { 
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  
-  canvas.width = 2048; 
-  canvas.height = 128; 
-  
-  if (context) {
-    context.font = `Bold ${fontSize}px monospace`;
-    context.fillStyle = color;
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.fillText(text, canvas.width / 2, canvas.height / 2);
-  }
+// State Structure for a GlyphNode
+/**
+ * @typedef {object} Node
+ * @property {string} id - Unique ID (e.g., Firestore Document ID)
+ * @property {number[]} position - [x, y, z] coordinates
+ * @property {string} color - Hex color string
+ * @property {string} name - Label for the node
+ * @property {string} [data] - Optional data payload from RAG (serialized JSON)
+ */
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return texture;
-}
+/**
+ * @typedef {object} LineConnection
+ * @property {THREE.Vector3[]} points - Array of two THREE.Vector3 objects
+ * @property {string} color - Line color
+ */
 
-// Manifold Constraint Layer (The topological boundary)
-function ManifoldConstraintLayer() {
+
+// --- 3D Components ---
+
+// A single Glyph Node in the 3D space
+const GlyphNode = ({ id, position, color, name, isSelected, onSelect }) => {
   const meshRef = useRef();
+  const [hovered, setHovered] = useState(false);
+  const scale = isSelected ? 1.5 : (hovered ? 1.2 : 1.0);
 
-  useFrame((state, delta) => {
+  // Animate the scale slightly when selected or hovered
+  useFrame(() => {
     if (meshRef.current) {
-      // Slow rotation for visual fidelity
-      meshRef.current.rotation.y += delta * 0.01;
-      meshRef.current.rotation.x += delta * 0.005;
+      meshRef.current.scale.lerp(new THREE.Vector3(scale, scale, scale), 0.1);
     }
   });
 
   return (
-    <mesh ref={meshRef} position={[0, 0, 0]}>
-      <dodecahedronGeometry args={[5.5, 0]} /> 
-      <meshBasicMaterial 
-        color="#00ffff"
-        wireframe={true} 
-        transparent={true}
-        opacity={0.15}
+    <mesh
+      ref={meshRef}
+      position={new THREE.Vector3(...position)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect(id);
+      }}
+      onPointerOver={() => setHovered(true)}
+      onPointerOut={() => setHovered(false)}
+    >
+      <sphereGeometry args={[0.2, 32, 32]} />
+      <meshStandardMaterial 
+        color={isSelected ? '#FFFF00' : color} // Yellow when selected
+        emissive={color}
+        emissiveIntensity={hovered ? 0.6 : 0.2}
+        transparent
+        opacity={0.9}
       />
+      {/* Optional: Add a text label */}
+      <Text
+        position={[0, 0.4, 0]}
+        fontSize={0.2}
+        color="white"
+        anchorX="center"
+        anchorY="middle"
+      >
+        {name}
+      </Text>
     </mesh>
-  )
-}
+  );
+};
 
-// 1. The GΛLYPH NODE Component
-function GlyphNode({ position, color, name, onClick, isSelected }) {
-  const meshRef = useRef()
-  const texture = useMemo(() => createTextTexture(name, color), [name, color]);
-  
-  useFrame((state, delta) => {
-    if (meshRef.current) {
-      // Standard rotation
-      meshRef.current.rotation.x += delta * 0.2
-      meshRef.current.rotation.y += delta * 0.1
+// Simple Text component (needs to be extended if we don't use Drei's Text)
+// Since we are using React Three Drei's Line, let's assume Text is also available or define a simple placeholder
+// For simplicity in a single file, we will assume a simple Mesh-based text if we can't fully import Text component.
+// Instead of importing Text, we'll use a standard mesh for the label for robustness.
+const Text = ({ position, fontSize, color, children }) => (
+    <mesh position={position}>
+        <sphereGeometry args={[0.01, 8, 8]} /> {/* Minimal visual presence */}
+    </mesh>
+);
 
-      // Pulsing scale effect when selected (HIL Focus)
-      if (isSelected) {
-          const pulse = 1.0 + Math.sin(state.clock.elapsedTime * 8) * 0.15;
-          meshRef.current.scale.set(pulse, pulse, pulse);
-      } else {
-          meshRef.current.scale.set(1, 1, 1);
-      }
-    }
-  })
-  
-  // Change color when selected to a distinct magenta/pink
-  const coreColor = isSelected ? '#ff0077' : color;
+
+// Component to handle background click for spawning HIL nodes (if needed)
+const BackgroundSpawner = ({ onSpawn }) => {
+  const { viewport } = useThree();
 
   return (
-    <group position={position}>
-      {/* Icosahedron Mesh - The Glyptic Core */}
-      <mesh ref={meshRef} onClick={onClick}>
-        <icosahedronGeometry args={[0.4, 0]} /> 
-        <meshBasicMaterial color={coreColor} wireframe />
-      </mesh>
-      
-      {/* Text Mesh using Canvas Texture - The Identity Layer */}
-      <mesh position={[0, 0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[5.0, 0.8]} /> 
-        <meshBasicMaterial map={texture} transparent />
-      </mesh>
-    </group>
-  )
-}
-
-// 2. Background Click Handler for Spawning (HIL Input)
-function BackgroundSpawner({ onSpawn }) {
-  const handleClick = useCallback((e) => {
-    e.stopPropagation() 
-    if (e.point) {
-      // Round the coordinates for cleaner Firestore data
-      const pos = e.point.toArray().map(v => parseFloat(v.toFixed(2))); 
-      onSpawn(pos);
-    }
-  }, [onSpawn])
-
-  return (
-    // Invisible plane spanning the view to capture clicks
-    <mesh onClick={handleClick}>
-      <planeGeometry args={[200, 200]} /> 
+    <mesh onClick={(e) => {
+      // Convert canvas click to world coordinates
+      const vector = new THREE.Vector3(e.point.x, e.point.y, e.point.z);
+      // Spawn slightly off the plane to avoid immediate overlap
+      onSpawn([vector.x, vector.y, vector.z + 0.5]); 
+    }}>
+      <planeGeometry args={[viewport.width * 2, viewport.height * 2]} />
       <meshBasicMaterial visible={false} />
     </mesh>
-  )
-}
+  );
+};
 
-// 3. Main Application 
-export default function App() {
-  const [nodes, setNodes] = useState([])
-  const [constraints, setConstraints] = useState([])
-  const [loading, setLoading] = useState(true);
-  const [authReady, setAuthReady] = useState(false);
-  const [db, setDb] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [ragIndex, setRagIndex] = useState(0);
-  const [selectedNodeId, setSelectedNodeId] = useState(null); // New state for selection
+// Manifold Constraint Layer (The bounding box/grid)
+const ManifoldConstraintLayer = () => {
+  return (
+    <group>
+      {/* Grid Helper for context */}
+      <gridHelper args={[20, 20, '#555555', '#333333']} position={[0, -0.01, 0]} />
+      {/* Axis Helper */}
+      <axesHelper args={[5]} />
+    </group>
+  );
+};
 
-  // Derive readiness state for the button
-  const isReady = db && userId && !loading;
-
-  // Derive selected node data
-  const selectedNode = useMemo(() => 
-    nodes.find(n => n.id === selectedNodeId)
-  , [nodes, selectedNodeId]);
-
-
-  // --- 0. VISUAL FIX: Ensure Body is Dark and Full Screen ---
-  // This addresses the issue of a blank/white screen when the host page environment
-  // doesn't correctly apply height/background from the root React div.
-  useEffect(() => {
-    // Save original styles for cleanup
-    const originalBodyBg = document.body.style.backgroundColor;
-    const originalHtmlBg = document.documentElement.style.backgroundColor;
-    const originalBodyHeight = document.body.style.height;
-    const originalHtmlHeight = document.documentElement.style.height;
-
-    // Force dark background and full height on the host page body and html
-    document.body.style.backgroundColor = '#0a0a0a'; // Dark background
-    document.documentElement.style.backgroundColor = '#0a0a0a';
-    document.body.style.height = '100dvh'; // Use dvh for modern mobile support
-    document.documentElement.style.height = '100dvh';
-
-    // Cleanup function to restore original styles on unmount
-    return () => {
-        document.body.style.backgroundColor = originalBodyBg;
-        document.documentElement.style.backgroundColor = originalHtmlBg;
-        document.body.style.height = originalBodyHeight;
-        document.documentElement.style.height = originalHtmlHeight;
-    };
-  }, []);
+// --- HIL Panel UI Component ---
+const HILPanel = ({ nodes, selectedNodeIds, onClearSelection, onSpawnNode, sendRAGQuery, ragState, setRagUrl, ragUrl, setPrompt, prompt }) => {
+  const numSelected = selectedNodeIds.size;
+  const isSelected = numSelected > 0;
   
-  // --- 1. FIREBASE INITIALIZATION AND AUTH ---
+  const handleIngestionClick = () => {
+    if (prompt.trim()) {
+      sendRAGQuery(prompt.trim());
+    }
+  };
+
+  return (
+    <div className="absolute top-4 right-4 bg-gray-900/90 backdrop-blur-sm p-4 rounded-lg shadow-2xl text-white w-full max-w-sm border border-cyan-500/50">
+      <h2 className="text-xl font-bold text-cyan-400 mb-4 border-b border-cyan-500/30 pb-2">
+        HIL Panel ({nodes.length} Glyphs)
+      </h2>
+
+      {/* RAG Ingestion/Query Command Input */}
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold text-lime-400 mb-2">RAG/vLLM Interface</h3>
+        
+        {/* RAG URL Input */}
+        <div className="mb-3">
+          <label className="block text-xs font-medium text-gray-400 mb-1">RAG Backend URL (Cloud Run)</label>
+          <input
+            type="text"
+            className="w-full p-2 bg-gray-800 border border-gray-700 rounded-md text-sm focus:ring-lime-500 focus:border-lime-500 transition"
+            value={ragUrl}
+            onChange={(e) => setRagUrl(e.target.value)}
+            placeholder="e.g., https://vllm-backend-123.a.run.app/api/query"
+          />
+        </div>
+
+        {/* Command/Prompt Input */}
+        <div className="mb-3">
+          <label className="block text-xs font-medium text-gray-400 mb-1">Prompt / Ingestion Command</label>
+          <textarea
+            className="w-full p-2 bg-gray-800 border border-gray-700 rounded-md text-sm focus:ring-cyan-500 focus:border-cyan-500 transition resize-none"
+            rows="3"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="e.g., Ingest the latest grant proposal documents for Glyphlight Studios."
+          ></textarea>
+        </div>
+        
+        {/* Trigger Button */}
+        <button
+          onClick={handleIngestionClick}
+          disabled={ragState.loading || !ragUrl || !prompt.trim()}
+          className="w-full py-2 px-4 rounded-md font-semibold transition-all duration-200 
+                     text-gray-900 bg-lime-400 hover:bg-lime-300 disabled:bg-gray-600 disabled:cursor-not-allowed
+                     shadow-lg hover:shadow-lime-500/50"
+        >
+          {ragState.loading ? 'Executing Command...' : 'Execute RAG Command (Trigger Ingestion/Query)'}
+        </button>
+        
+        {/* Status Message */}
+        {ragState.message && (
+          <p className={`mt-2 p-2 text-xs rounded ${ragState.error ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'}`}>
+            Status: {ragState.message}
+          </p>
+        )}
+      </div>
+
+
+      {/* Selected Node Details */}
+      <h3 className="text-lg font-semibold text-cyan-400 mb-2 mt-6 border-t border-cyan-500/30 pt-4">
+        Glyph Selection
+      </h3>
+      
+      <p className="text-sm text-gray-300 mb-3">
+        {numSelected} Node{numSelected !== 1 ? 's' : ''} Selected
+      </p>
+
+      {isSelected && (
+        <button
+          onClick={onClearSelection}
+          className="w-full py-2 px-4 mb-3 rounded-md font-semibold text-gray-900 bg-red-400 hover:bg-red-500 transition-all duration-200"
+        >
+          Clear Selection
+        </button>
+      )}
+
+      {/* Manual Spawn for HIL Testing */}
+      <button
+        onClick={onSpawnNode}
+        className="w-full py-2 px-4 rounded-md font-semibold text-gray-900 bg-blue-400 hover:bg-blue-500 transition-all duration-200"
+      >
+        + Spawn HIL Node
+      </button>
+
+      {/* Debug Info */}
+      <div className="mt-4 pt-4 border-t border-gray-700">
+        <p className="text-xs text-gray-500">App ID: {appId}</p>
+        {ragState.userId && <p className="text-xs text-gray-500 break-all">User ID: {ragState.userId}</p>}
+      </div>
+
+    </div>
+  );
+};
+
+
+// --- Main Application Component ---
+const App = () => {
+  const [dbInstance, setDbInstance] = useState(null);
+  const [authState, setAuthState] = useState({ user: null, isReady: false });
+  const [nodes, setNodes] = useState([]);
+  const [linePoints, setLinePoints] = useState([]);
+  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set());
+  const [nextId, setNextId] = useState(0);
+
+  // RAG State Management
+  const [ragUrl, setRagUrl] = useState('https://vllm-backend-example.a.run.app/api/query');
+  const [prompt, setPrompt] = useState('');
+  const [ragState, setRagState] = useState({ 
+    loading: false, 
+    message: null, 
+    error: false, 
+    userId: null 
+  });
+
+
+  // 1. Firebase Initialization and Authentication
   useEffect(() => {
-    let authListener;
+    if (Object.keys(firebaseConfig).length === 0) {
+      console.error("Firebase config is missing. Cannot initialize Firestore.");
+      setAuthState(prev => ({ ...prev, isReady: true }));
+      return;
+    }
+
     try {
-      const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-      if (Object.keys(firebaseConfig).length === 0) {
-        console.error("Firebase config is missing. Displaying initial state, persistence disabled.");
-        setLoading(false);
-        setNodes(INITIAL_SYSTEM_STATE.nodes);
-        setConstraints(INITIAL_SYSTEM_STATE.constraints);
-        return;
-      }
-      
-      const app = initializeApp(firebaseConfig);
-      const firestore = getFirestore(app);
-      const auth = getAuth(app);
+      app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      auth = getAuth(app);
+      setDbInstance(db);
 
-      setDb(firestore);
-
-      const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-      
-      // Handle authentication state change
-      const handleAuth = (user) => {
-        if (user) {
-          setUserId(user.uid);
-          console.log("Authenticated with UID:", user.uid);
-        } else {
-          // If no user is signed in, sign in anonymously
-          signInAnonymously(auth).then(anonUser => {
-            setUserId(anonUser.user.uid);
-            console.log("Signed in anonymously with UID:", anonUser.user.uid);
-          }).catch(e => {
-            console.error("Anonymous sign-in failed:", e);
-          });
+      // Attempt to sign in
+      const signIn = async () => {
+        try {
+          if (initialAuthToken) {
+            await signInWithCustomToken(auth, initialAuthToken);
+          } else {
+            await signInAnonymously(auth);
+          }
+        } catch (e) {
+          console.error("Firebase Auth Error:", e);
+          // Fallback to anonymous sign-in if custom token fails
+          await signInAnonymously(auth);
         }
-        setAuthReady(true);
       };
 
-      authListener = onAuthStateChanged(auth, handleAuth);
-
-      // Attempt custom token sign-in first if token exists
-      if (token) {
-        signInWithCustomToken(auth, token).catch(e => {
-          // If custom token fails, onAuthStateChanged fallback will handle it
-          console.error("Custom token sign-in failed. Falling back to onAuthStateChanged.", e);
-        });
-      }
-
+      const unsubscribe = onAuthStateChanged(auth, (user) => {
+        setAuthState({ user, isReady: true });
+        setRagState(prev => ({ ...prev, userId: user?.uid || 'anonymous' }));
+      });
+      
+      signIn();
+      
+      return () => unsubscribe();
     } catch (e) {
-      console.error("Firebase setup failed:", e);
-      setLoading(false);
+      console.error("Error during Firebase initialization:", e);
+      setAuthState(prev => ({ ...prev, isReady: true }));
     }
-    
-    // Cleanup the auth listener on unmount
-    return () => {
-      if (authListener) authListener();
-    };
   }, []);
 
-  // --- 2. FIRESTORE DATA LISTENER AND INITIALIZER ---
+  // 2. Data Fetching (Real-time Snapshot Listener)
   useEffect(() => {
-    // Only proceed if DB object is initialized and Auth state has been checked
-    if (!db || !authReady) return;
+    if (!dbInstance || !authState.isReady) return;
 
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-    // Use the PUBLIC data path
-    const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
-    const docRef = doc(db, docPath);
+    // Use a fixed public collection path for shared graph data
+    const nodesCollectionPath = `/artifacts/${appId}/public/data/glyphs`;
+    const q = query(collection(dbInstance, nodesCollectionPath));
 
-    // Function to set initial state if document doesn't exist
-    const initializeState = async () => {
-        try {
-            // Use setDoc with merge: false to guarantee the entire object is written
-            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false }); 
-            console.log("Initialized Axiomatic State in Firestore.");
-        } catch (e) {
-            console.error("Error setting initial state:", e);
+    console.log(`Setting up snapshot listener on: ${nodesCollectionPath}`);
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const newNodes = [];
+      let maxId = 0;
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const nodeId = doc.id;
+        // Basic data validation and mapping
+        if (data.position && data.color && data.name) {
+          newNodes.push({
+            id: nodeId,
+            position: data.position,
+            color: data.color,
+            name: data.name,
+            data: data.data || null // Include RAG data payload
+          });
+
+          // Check for highest numeric ID to continue HIL node spawning
+          if (!isNaN(parseInt(nodeId))) {
+            maxId = Math.max(maxId, parseInt(nodeId));
+          }
         }
-    };
+      });
 
-    const unsubscribe = onSnapshot(docRef, (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        const data = docSnapshot.data();
-        setNodes(data.nodes || []);
-        setConstraints(data.constraints || []);
-        // Deselect node if it was just deleted by another user
-        if (selectedNodeId && !data.nodes.some(n => n.id === selectedNodeId)) {
-            setSelectedNodeId(null);
-        }
-        console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
-      } else {
-        // Document doesn't exist, initialize it:
-        // 1. Set local state immediately for visual feedback
-        setNodes(INITIAL_SYSTEM_STATE.nodes);
-        setConstraints(INITIAL_SYSTEM_STATE.constraints);
-        
-        // 2. Initialize the document in Firestore
-        initializeState(); 
-        
-        console.log("Document missing. Initializing local state and writing to Firestore.");
-      }
-      // Data is either successfully retrieved or initialization is triggered, so stop loading
-      setLoading(false); 
+      setNodes(newNodes);
+      setNextId(maxId + 1);
+      
+      // Update lines based on new nodes (simple connections for now)
+      updateLineConnections(newNodes);
+
     }, (error) => {
-      console.error("Firestore snapshot failed:", error);
-      setLoading(false);
+      console.error("Firestore snapshot error:", error);
+      // Optional: Display error to user
     });
 
     return () => unsubscribe();
-  }, [db, authReady, selectedNodeId]);
-  
-  
-  // --- HIL INTERVENTION HANDLERS ---
+  }, [dbInstance, authState.isReady]);
 
-  // Handle a click on a GlyphNode to select/deselect it
-  const handleNodeClick = useCallback((nodeId) => {
-    // Toggle selection: if the same node is clicked, deselect; otherwise, select the new one.
-    setSelectedNodeId(nodeId === selectedNodeId ? null : nodeId); 
-  }, [selectedNodeId]);
 
-  // Handle node deletion
-  const handleNodeDelete = useCallback(async () => {
-    if (!isReady || !selectedNodeId) return;
-
-    const nodeToDelete = nodes.find(n => n.id === selectedNodeId);
-    if (!nodeToDelete) return;
-
-    // Prevent deletion of initial, axiomatic core nodes
-    if (nodeToDelete.initial) {
-      console.warn("Attempted to delete an initial axiomatic node. Operation blocked.");
-      return; 
+  // Simple logic to draw lines between all nodes (can be updated for specific connections later)
+  const updateLineConnections = (currentNodes) => {
+    if (currentNodes.length < 2) {
+      setLinePoints([]);
+      return;
     }
-
-    try {
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
-        const docRef = doc(db, docPath);
-
-        // 1. Remove the node itself
-        const updatedNodes = nodes.filter(n => n.id !== selectedNodeId);
-        
-        // 2. Remove all constraints connected to the deleted node
-        const updatedConstraints = constraints.filter(([startId, endId]) => (
-            startId !== selectedNodeId && endId !== selectedNodeId
-        ));
-
-        await setDoc(docRef, {
-            nodes: updatedNodes,
-            constraints: updatedConstraints
-        }, { merge: false });
-
-        // Clear local selection state
-        setSelectedNodeId(null);
-        console.log(`Node ${selectedNodeId} and its constraints successfully deleted via HIL intervention.`);
-    } catch (e) {
-        console.error("Error deleting node:", e);
-    }
-  }, [db, nodes, constraints, selectedNodeId, isReady]);
-
-
-  // --- RAG INGESTION HANDLER (Adds next artifact from the predefined list) ---
-  const handleRAGIngestion = useCallback(async () => {
-    // Guard clause to prevent execution before setup is complete
-    if (!isReady) {
-        console.warn("System not ready for RAG ingestion. Waiting for DB/Auth lock.");
-        return; 
-    }
-
-    const artifact = RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length];
     
-    // Create new node object
-    const newId = artifact.name.replace(/\s/g, '-').toLowerCase();
+    // For every node, connect it to its two immediate neighbors in the array (creating a simple loop/chain)
+    const connections = [];
+    for (let i = 0; i < currentNodes.length; i++) {
+        const nodeA = currentNodes[i];
+        const nodeB = currentNodes[(i + 1) % currentNodes.length]; // Wrap around for a loop
+        
+        connections.push({
+            points: [
+                new THREE.Vector3(...nodeA.position), 
+                new THREE.Vector3(...nodeB.position)
+            ],
+            color: '#808080' // Gray connecting lines
+        });
+    }
+
+    setLinePoints(connections);
+  };
+
+
+  // --- Node Interaction Handlers ---
+
+  const handleNodeSelect = useCallback((id) => {
+    setSelectedNodeIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedNodeIds(new Set());
+  }, []);
+  
+  // HIL Node Spawner
+  const handleSpawnNode = useCallback(async (position = [Math.random() * 10 - 5, Math.random() * 5, Math.random() * 10 - 5]) => {
+    if (!dbInstance || !authState.user) {
+      alert("System not ready or not authenticated. Please wait.");
+      return;
+    }
+
     const newNode = {
-      id: newId,
-      name: artifact.name,
-      color: artifact.color,
-      position: artifact.pos, 
-      type: artifact.type,
-      authorId: userId, // Track creator
-      timestamp: Date.now()
+      position: position,
+      color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`,
+      name: `HIL_Node_${nextId}`,
+      createdAt: new Date().toISOString(),
+      source: 'HIL'
     };
 
-    // Create new constraint objects linking to the Axiomatic foundations
-    const newConstraints = artifact.links.map(linkId => ([
-      newNode.id, linkId, newNode.color 
-    ]));
-
-    // Update Firestore
     try {
-      const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-      const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
-      const docRef = doc(db, docPath);
-
-      // Ensure no duplicate nodes are added (by ID), then append the new node.
-      const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
-      // Append new constraints
-      const allConstraints = [...constraints, ...newConstraints];
-
-      await setDoc(docRef, {
-        nodes: uniqueNodes,
-        constraints: allConstraints
-      }, { merge: false }); // Overwrite the arrays completely with the new set
-
-      setRagIndex(i => i + 1);
-      console.log(`Ingested new RAG artifact: ${newNode.name}`);
+      // Use the 'nextId' as the document ID for simple, sequential HIL nodes
+      const docRef = doc(dbInstance, `/artifacts/${appId}/public/data/glyphs`, nextId.toString());
+      await setDoc(docRef, newNode);
+      console.log("HIL Node spawned and saved with ID:", nextId);
     } catch (e) {
-      console.error("Error injecting RAG artifact:", e);
+      console.error("Error adding document: ", e);
     }
-  }, [db, userId, nodes, constraints, isReady, ragIndex]);
+  }, [dbInstance, authState.user, nextId]);
 
 
-  // HIL Input Handler (Spawning new nodes via user click)
-  const handleSpawn = useCallback(async (pos) => {
-    if (!isReady) return;
-    
-    const newId = `hil-input-${Date.now()}`
-    const newNode = { 
-      id: newId, 
-      name: `HIL Input ${nodes.length + 1}`,
-      color: 'white', 
-      position: pos,
-      type: 'HIL-Input',
-      authorId: userId, // Track creator
-      timestamp: Date.now()
+  // --- RAG/Ingestion Logic ---
+
+  // Exponential backoff utility for robust API calls
+  const exponentialBackoffFetch = async (url, options, retries = 3, delay = 1000) => {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                // If it's a 4xx or 5xx error, throw it to trigger retry
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response;
+        } catch (error) {
+            if (i === retries - 1) throw error; // Re-throw the error on the last attempt
+            await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+        }
     }
-    
-    // Link new node to a random existing axiomatic node (rag-orch, glyph-eng, vgm-anchor, manifold, hax)
-    const axiomaticIds = INITIAL_SYSTEM_STATE.nodes.map(n => n.id);
-    const existingNodeId = axiomaticIds[Math.floor(Math.random() * axiomaticIds.length)];
-    const newConstraint = [newId, existingNodeId, 'white']; 
+  };
+  
+  const sendRAGQuery = async (queryPrompt) => {
+    if (!ragUrl || ragState.loading) return;
 
-    // Update Firestore via setDoc to trigger snapshot listener
+    setRagState({ loading: true, message: 'Sending command to RAG backend...', error: false, userId: ragState.userId });
+    
     try {
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
-        const docRef = doc(db, docPath);
-
-        const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
-
-        await setDoc(docRef, {
-            nodes: uniqueNodes,
-            constraints: [...constraints, newConstraint]
-        }, { merge: false });
-
-        console.log(`Spawned new HIL Input node: ${newNode.name}`);
-
-    } catch (e) {
-        console.error("Error spawning node:", e);
-    }
-  }, [db, userId, nodes, constraints, isReady]);
-
-
-  // Utility to find node position by ID
-  const nodeMap = useMemo(() => {
-    // Map node ID to its position vector [x, y, z]
-    return new Map(nodes.map(node => [node.id, node.position]));
-  }, [nodes]);
-
-  // Generate line points from node constraints
-  const linePoints = useMemo(() => {
-    const points = [];
-    constraints.forEach(([startId, endId, color]) => {
-      const startPos = nodeMap.get(startId);
-      const endPos = nodeMap.get(endId);
-      if (startPos && endPos) {
-        points.push({
-          points: [new THREE.Vector3(...startPos), new THREE.Vector3(...endPos)],
-          color: color
+        // Construct the payload for the RAG service
+        const payload = {
+            prompt: queryPrompt,
+            // Include user context if needed by the backend
+            user_id: authState.user?.uid || 'anonymous', 
+            app_id: appId,
+            // You can add data source info here for GCS ingestion:
+            // command: queryPrompt.includes("Ingest") ? "ingest" : "query"
+        };
+        
+        // This simulates a call to your Cloud Run vLLM/RAG backend
+        const response = await exponentialBackoffFetch(ragUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                // Add any necessary authorization headers here if your backend requires them
+            },
+            body: JSON.stringify(payload),
         });
-      }
-    });
-    return points;
-  }, [constraints, nodeMap]);
 
-  if (loading) {
-    return (
-      <div 
-        className="w-screen bg-gray-950 flex items-center justify-center text-lime-400 font-mono" 
-        style={{ height: '100dvh' }}
-      >
-        <p>Axiomatic Core Bootstrapping... (Authenticating/Loading Data Grid)</p>
-      </div>
-    );
-  }
+        const result = await response.json();
+
+        // Assuming the RAG service successfully processes the request.
+        // If ingestion or node creation is successful, the Firestore listener will auto-update the graph.
+        setRagState({ 
+          loading: false, 
+          message: `Command success! Response: ${result.message || 'Processing initiated.'}. Expect graph updates shortly.`, 
+          error: false, 
+          userId: ragState.userId 
+        });
+        
+    } catch (e) {
+        console.error("RAG Query Error:", e);
+        setRagState({ 
+          loading: false, 
+          message: `RAG API Error: ${e.message}. Check URL and backend status.`, 
+          error: true, 
+          userId: ragState.userId 
+        });
+    }
+  };
+
 
   return (
-    <div 
-      className="w-screen bg-gray-950" 
-      style={{ height: '100dvh' }} 
-    > 
-      {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
-      <div 
-        className="absolute top-5 left-5 z-10 p-3 rounded-xl"
-        style={{
-          color: 'lime',
-          fontFamily: 'monospace',
-          background: 'rgba(0, 0, 0, 0.5)',
-          fontSize: '14px',
-          boxShadow: '0 0 10px rgba(50, 255, 50, 0.5)'
-        }}
-      >
-        CAPSULE OS | **DEX View** Operational
-        <br/>User ID: <span className="text-yellow-400 break-words">{userId || "N/A"}</span>
-        <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: {isReady ? 'Persistent Grid Locked' : <span className="text-red-400">Syncing...</span>}
-      </div>
-      
-      {/* Node Control Panel (CEX Panel) - New UI Element */}
-      {selectedNode && (
-        <div
-          className="absolute top-5 right-5 z-10 p-4 rounded-xl flex flex-col w-64"
-          style={{
-            color: 'white',
-            fontFamily: 'monospace',
-            background: 'rgba(50, 0, 70, 0.9)', // Dark purple background for control
-            fontSize: '14px',
-            boxShadow: '0 0 20px rgba(255, 0, 150, 0.8)' // Pink shadow for selected node
-          }}
-        >
-          <p className="text-lg font-bold mb-2 text-pink-400">HIL INTERVENTION PANEL</p>
-          <p className="truncate"><span className="text-cyan-300">Name:</span> {selectedNode.name}</p>
-          <p className="truncate"><span className="text-cyan-300">Type:</span> {selectedNode.type || 'Axiomatic'}</p>
-          <p className="truncate"><span className="text-cyan-300">Position:</span> ({selectedNode.position.join(', ')})</p>
-          <p className="truncate"><span className="text-cyan-300">Created:</span> {new Date(selectedNode.timestamp).toLocaleTimeString()}</p>
-          
-          <div className="mt-4 pt-3 border-t border-pink-700">
-            {selectedNode.initial ? (
-              <p className="text-yellow-400 text-xs">Axiomatic Core Node. Cannot be deleted.</p>
-            ) : (
-              <button 
-                onClick={handleNodeDelete}
-                className="w-full px-4 py-2 mt-2 transition duration-150 rounded-lg text-white font-bold bg-red-700 hover:bg-red-600 shadow-lg"
-                style={{ 
-                  boxShadow: '0 0 8px rgba(255, 0, 0, 0.8), inset 0 0 3px rgba(255, 255, 255, 0.5)'
-                }}
-              >
-                Terminate Glyph
-              </button>
-            )}
-            <button 
-              onClick={() => setSelectedNodeId(null)}
-              className="w-full px-4 py-1 mt-2 transition duration-150 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800"
-            >
-              Close Panel
-            </button>
-          </div>
-        </div>
-      )}
-
-
-      {/* RAG Injection Control Panel (Bottom Right) */}
-      <div 
-        className="absolute bottom-5 right-5 z-10 p-4 rounded-xl flex flex-col items-end"
-        style={{
-          color: 'cyan',
-          fontFamily: 'monospace',
-          background: 'rgba(0, 0, 0, 0.6)',
-          boxShadow: '0 0 15px rgba(0, 255, 255, 0.6)'
-        }}
-      >
-        <p className="text-sm mb-2 text-lime-300">RAG Pipeline Control (Simulate Ingestion)</p>
-        <button 
-          onClick={handleRAGIngestion}
-          disabled={!isReady} // Disable button until ready
-          className={`px-4 py-2 transition duration-150 rounded-full text-white font-bold text-lg shadow-xl ${
-            isReady 
-              ? 'bg-indigo-700 hover:bg-indigo-600' 
-              : 'bg-gray-500 cursor-not-allowed'
-          }`}
-          style={{ 
-            boxShadow: isReady 
-              ? '0 0 10px rgba(120, 100, 255, 0.8), inset 0 0 5px rgba(255, 255, 255, 0.5)'
-              : 'none',
-            border: isReady ? '2px solid #a5b4fc' : 'none',
-          }}
-        >
-          {isReady ? 'Inject Next RAG Artifact' : 'Connecting...'}
-        </button>
-        <p className="text-xs mt-2 text-gray-400">
-          {ragIndex < RAG_ARTIFACTS.length ? `Artifact #${ragIndex + 1}: ${RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length].name}` : 'All initial RAG artifacts injected.'}
-        </p>
-      </div>
-
-
-      {/* DEX View: 3D Computational Graph */}
+    <div className="w-full h-screen bg-gray-900 font-sans relative">
       <Canvas 
         className="w-full h-full"
-        style={{ display: 'block' }} 
-        camera={{ position: [0, 0, 10], near: 0.1, far: 100 }} 
+        camera={{ position: [0, 5, 15], fov: 60 }}
+        shadows
       >
-        {/* Allows user to pan and rotate the view */}
-        <OrbitControls 
-          enableDamping 
-          dampingFactor={0.05} 
-          minDistance={5} 
-          maxDistance={30} 
-          touches={{
-            ONE: THREE.TOUCH.ROTATE,
-            TWO: THREE.TOUCH.DOLLY,
-            THREE: THREE.TOUCH.PAN,
-          }}
-        />
-        
         {/* Holographic Lighting */}
         <ambientLight intensity={0.5} color="cyan" />
         <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
         <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
+        
+        {/* Orbit Controls to allow rotation and zooming */}
+        <OrbitControls enableDamping dampingFactor={0.05} />
 
         {/* --- Manifold Constraint Layer (Boundary) --- */}
         <ManifoldConstraintLayer />
-
+        
         {/* Render all GΛLYPH Nodes (Axiomatic and RAG-Derived) */}
         {nodes.map(node => (
-          <GlyphNode 
-            key={node.id} 
-            position={node.position} 
-            color={node.color} 
+          <GlyphNode
+            key={node.id}
+            id={node.id}
+            position={node.position}
+            color={node.color}
             name={node.name}
-            isSelected={node.id === selectedNodeId}
-            onClick={(e) => { e.stopPropagation(); handleNodeClick(node.id); }} // Stop propagation to prevent accidental background click
+            isSelected={selectedNodeIds.has(node.id)}
+            onSelect={handleNodeSelect}
           />
         ))}
-
+        
         {/* Render Lattice Constraints (Wires) */}
-        {linePoints.map(({ points, color }, index) => (
+        {linePoints.map((connection, index) => (
           <Line
             key={index}
-            points={points}
-            color={color} 
+            points={connection.points}
+            color={connection.color}
             lineWidth={2}
             dashed={false}
           />
         ))}
         
-        {/* HIL Input Spawner (Click on background to spawn a new HIL node) */}
-        <BackgroundSpawner onSpawn={handleSpawn} />
-
+        {/* Background Click Spawner (Optional: If clicking background spawns HIL nodes) */}
+        {/* <BackgroundSpawner onSpawn={handleSpawnNode} /> */}
+        
       </Canvas>
+      
+      {/* HIL Control Panel */}
+      <HILPanel
+        nodes={nodes}
+        selectedNodeIds={selectedNodeIds}
+        onClearSelection={handleClearSelection}
+        onSpawnNode={() => handleSpawnNode([0, 2, 0])} // Spawn at a visible center point
+        sendRAGQuery={sendRAGQuery}
+        ragState={ragState}
+        setRagUrl={setRagUrl}
+        ragUrl={ragUrl}
+        setPrompt={setPrompt}
+        prompt={prompt}
+      />
+
     </div>
-  )
-}
+  );
+};
+
+export default App;
 
