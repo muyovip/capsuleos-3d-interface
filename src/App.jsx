@@ -286,7 +286,7 @@ function TerminalOverlay({ selectedNodeId, closeTerminal, nodes }) {
               onClick={closeTerminal} 
               className="text-white hover:text-red-500 transition-colors p-1 rounded"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
         </div>
@@ -480,7 +480,7 @@ export default function App() {
       }} className="hidden sm:block">
         CAPSULE OS | **DEX View** <br/>
         Status: IMMERSION LOCK <br/>
-        User ID: {userId ? userId.substring(0, 10) : 'Loading...'} <br/>
+        User ID: {userId ? userId.substring(0, 10) + '...' + userId.substring(userId.length - 4) : 'Loading...'} <br/>
         Total Nodes: {nodes.length}
       </div>
       
@@ -519,18 +519,5 @@ export default function App() {
       />
     </div>
   )
-}
-
-eof
-Summary of Changes:
- * Firestore Integration: Added useEffect blocks to initialize Firebase and sign in the user.
- * Real-time Node Fetching: The second useEffect connects to the public collection (/artifacts/{appId}/public/data/axiom_nodes) and uses onSnapshot to listen for real-time changes. The nodes array will now update automatically when data is added to this collection (this is the step where new nodes will appear!).
- * Clickable Nodes: The GlyphNode now calls handleNodeSelect(id), which sets the selectedNodeId state.
- * Terminal UI: The new TerminalOverlay component appears when selectedNodeId is set, providing a sleek, responsive, console-like chat interface ready to connect to your vLLM RAG backend. I've also added the full userId to the HUD as requested for collaboration purposes.
-Now, if you add a document to your Firestore under the path /artifacts/{your_app_id}/public/data/axiom_nodes/ with fields like:
-{
-  "name": "New Chat Node",
-  "color": "#ff00ff",
-  "position": [10, -5, 0] 
 }
 
