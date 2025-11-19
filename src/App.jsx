@@ -3,15 +3,9 @@ import { OrbitControls, Line, Text } from '@react-three/drei'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
-// --- FIREBASE IMPORTS (Keep your existing config) ---
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
-
 // --- CONFIGURATION ---
-// Boosted particle count for "Galaxy" density
-const PARTICLE_COUNT_INNER = 20000;
-const PARTICLE_COUNT_OUTER = 40000;
+const PARTICLE_COUNT_INNER = 15000;
+const PARTICLE_COUNT_OUTER = 35000;
 
 // --- AXIOMATIC DATA ---
 const INITIAL_SYSTEM_STATE = {
@@ -31,7 +25,25 @@ const INITIAL_SYSTEM_STATE = {
   ],
 };
 
-// --- PARTICLE PLANET SHADER MATERIAL ---
+// --- RESPONSIVE CAMERA CONTROLLER ---
+// Automatically adjusts zoom based on screen orientation
+function ResponsiveCamera() {
+  const { camera, size } = useThree();
+  
+  useEffect(() => {
+    const aspect = size.width / size.height;
+    // If Portrait (aspect < 1), move camera BACK to fit the width
+    // If Landscape (aspect > 1), move camera CLOSER for detail
+    const targetZ = aspect < 1 ? 35 : 18;
+    
+    camera.position.set(0, 2, targetZ);
+    camera.updateProjectionMatrix();
+  }, [size, camera]);
+
+  return null;
+}
+
+// --- PARTICLE SHADER ---
 const ParticleShaderMaterial = {
   vertexShader: `
     uniform float time;
@@ -39,25 +51,23 @@ const ParticleShaderMaterial = {
     attribute vec4 shift;
     varying vec3 vColor;
     void main() {
-      vec3 color1 = vec3(227., 155., 0.) / 255.; // Orange Core
-      vec3 color2 = vec3(100., 50., 255.) / 255.; // Purple Outer
+      vec3 color1 = vec3(227., 155., 0.) / 255.; // Orange
+      vec3 color2 = vec3(100., 50., 255.) / 255.; // Purple
       
       vec3 newPos = position;
-      
       float t = time;
-      float moveT = mod(shift.x + shift.z * t, 6.28318);
+      // Orbital mechanics
+      float moveT = mod(shift.x + shift.z * t, 6.28318); 
       float moveS = mod(shift.y + shift.z * t, 6.28318);
-      
       newPos += vec3(cos(moveS) * sin(moveT), cos(moveT), sin(moveS) * sin(moveT)) * shift.w;
       
       float d = length(abs(position) / vec3(40., 10., 40.));
       d = clamp(d, 0., 1.);
-      
       vColor = mix(color1, color2, d);
       
       vec4 mvPosition = modelViewMatrix * vec4(newPos, 1.0);
-      // Increased size multiplier (20.0) for mobile visibility
-      gl_PointSize = sizes * (20.0 / -mvPosition.z);
+      // Boost size for mobile visibility
+      gl_PointSize = sizes * (30.0 / -mvPosition.z);
       gl_Position = projectionMatrix * mvPosition;
     }
   `,
@@ -71,7 +81,7 @@ const ParticleShaderMaterial = {
   `
 };
 
-// --- COMPONENT: FUSION PARTICLE PLANET ---
+// --- FUSION PARTICLE PLANET ---
 function ParticlePlanet() {
   const mesh = useRef();
   
@@ -83,9 +93,9 @@ function ParticlePlanet() {
 
     let ptr = 0;
 
-    // Inner Core
+    // Inner Core (Volumetric Sphere)
     for (let i = 0; i < PARTICLE_COUNT_INNER; i++) {
-      const r = Math.random() * 0.5 + 9.5;
+      const r = Math.random() * 3.0 + 8.0; // Thicker core (8-11 radius)
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
       
@@ -93,8 +103,7 @@ function ParticlePlanet() {
       positions[ptr * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       positions[ptr * 3 + 2] = r * Math.cos(phi);
       
-      // Larger particles for core
-      sizes[ptr] = Math.random() * 2.0 + 1.0; 
+      sizes[ptr] = Math.random() * 2.0 + 1.0;
       shifts[ptr * 4] = Math.random() * Math.PI;
       shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
       shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
@@ -102,14 +111,16 @@ function ParticlePlanet() {
       ptr++;
     }
 
-    // Outer Shell (Galaxy Ring)
+    // Outer Shell (Thickened Galaxy)
     for (let i = 0; i < PARTICLE_COUNT_OUTER; i++) {
-      const r = 10; 
-      const R = 40;
+      const r = 12; 
+      const R = 45; // Wider galaxy
       const rand = Math.pow(Math.random(), 1.5);
       const radius = Math.sqrt(R * R * rand + (1 - rand) * r * r);
       const theta = Math.random() * 2 * Math.PI;
-      const y = (Math.random() - 0.5) * 2;
+      
+      // Vertical spread (Y) increased from 2.0 to 12.0 to fill mobile screen
+      const y = (Math.random() - 0.5) * 12.0; 
 
       const v = new THREE.Vector3().setFromCylindricalCoords(radius, theta, y);
       
@@ -117,7 +128,7 @@ function ParticlePlanet() {
       positions[ptr * 3 + 1] = v.y;
       positions[ptr * 3 + 2] = v.z;
       
-      sizes[ptr] = Math.random() * 2.0 + 1.0;
+      sizes[ptr] = Math.random() * 2.5 + 1.0; // Big bright stars
       shifts[ptr * 4] = Math.random() * Math.PI;
       shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
       shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
@@ -132,7 +143,8 @@ function ParticlePlanet() {
     if (mesh.current) {
       mesh.current.material.uniforms.time.value = state.clock.elapsedTime;
       mesh.current.rotation.y = state.clock.elapsedTime * 0.05;
-      mesh.current.rotation.z = 0.2; 
+      mesh.current.rotation.z = 0.1; // Gentle tilt
+      mesh.current.rotation.x = -0.2; // Tilt toward camera to show "face" of galaxy
     }
   });
 
@@ -155,7 +167,7 @@ function ParticlePlanet() {
   );
 }
 
-// --- AXIOMATIC NODE COMPONENT ---
+// --- AXIOMATIC NODE (Satellites) ---
 function GlyphNode({ id, position, color, name, onSelect }) {
   const meshRef = useRef()
   
@@ -174,20 +186,20 @@ function GlyphNode({ id, position, color, name, onSelect }) {
   return (
     <group position={position} onClick={handleClick}>
       <mesh ref={meshRef}>
-        <icosahedronGeometry args={[0.6, 0]} /> 
-        <meshBasicMaterial color={color} wireframe thickness={0.1} />
+        <icosahedronGeometry args={[0.8, 0]} /> 
+        <meshBasicMaterial color={color} wireframe thickness={0.15} />
       </mesh>
       <mesh>
-        <sphereGeometry args={[0.65, 16, 16]} />
-        <meshBasicMaterial color={color} transparent opacity={0.1} />
+        <sphereGeometry args={[0.9, 16, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.15} />
       </mesh>
-      <group position={[0, 0.9, 0]}>
+      <group position={[0, 1.2, 0]}>
          <Text
-            fontSize={0.3}
+            fontSize={0.4}
             color="white"
             anchorX="center"
             anchorY="middle"
-            outlineWidth={0.02}
+            outlineWidth={0.03}
             outlineColor="black"
           >
             {name}
@@ -203,7 +215,8 @@ export default function App() {
   const [constraints, setConstraints] = useState(INITIAL_SYSTEM_STATE.constraints)
   
   const handleNodeSelect = (id) => {
-    console.log("Axiomatic Node Selected:", id);
+    console.log("Node Selected:", id);
+    // Add haptic feedback here later
   }
 
   const linePoints = useMemo(() => {
@@ -222,26 +235,27 @@ export default function App() {
   }, [nodes, constraints]);
 
   return (
-    // FIXED: Use 100dvh and fixed positioning for absolute mobile coverage
-    <div className="fixed inset-0 w-screen h-[100dvh] bg-black overflow-hidden">
-      {/* HUD Overlay */}
+    // CSS FIX: 100dvh (Dynamic Viewport Height) fixes the address bar scroll issue
+    <div className="fixed inset-0 w-full h-[100dvh] bg-black overflow-hidden touch-none">
+      {/* HUD */}
       <div style={{
-        position: 'absolute', top: 20, left: 20, zIndex: 10,
+        position: 'absolute', top: 'safe-area-inset-top', left: 20, zIndex: 10, marginTop: 20,
         color: 'cyan', fontFamily: 'monospace', pointerEvents: 'none',
         textShadow: '0 0 10px cyan'
       }}>
         CAPSULE OS | **DEX View** <br/>
-        Structural Fidelity: 99.2% <br/>
-        Manifold: LOCKED
+        Status: IMMERSION LOCK <br/>
+        Input: TOUCH ENABLED
       </div>
 
-      {/* DEX View: 3D Graph */}
-      <Canvas camera={{ position: [0, 2, 14], fov: 60 }}>
+      <Canvas dpr={[1, 2]}>
+        <ResponsiveCamera />
         <OrbitControls 
           enableDamping 
           dampingFactor={0.05} 
           minDistance={5} 
-          maxDistance={50} 
+          maxDistance={80}
+          enablePan={false}
         />
         
         <ParticlePlanet />
@@ -259,9 +273,9 @@ export default function App() {
             key={i} 
             points={[l.start, l.end]} 
             color={l.color} 
-            lineWidth={1} 
+            lineWidth={1.5} 
             transparent 
-            opacity={0.6} 
+            opacity={0.5} 
           />
         ))}
       </Canvas>
