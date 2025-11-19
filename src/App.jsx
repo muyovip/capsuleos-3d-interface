@@ -1,5 +1,5 @@
 import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, Line, Text } from '@react-three/drei' 
+import { OrbitControls, Line } from '@react-three/drei' 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
@@ -37,25 +37,45 @@ const RAG_ARTIFACTS = [
     { name: "Nico Robin Agent", color: "yellow", type: "HIL-Agent", pos: [-1, 4, 3], links: ['hax', 'manifold'] }
 ];
 
+// Helper function to create a texture with text on it (Absolute Fidelity)
+function createTextTexture(text, color, fontSize = 64) { 
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  
+  canvas.width = 2048; 
+  canvas.height = 128; 
+
+  context.font = `Bold ${fontSize}px monospace`;
+  context.fillStyle = color;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 // Manifold Constraint Layer (The topological boundary)
 function ManifoldConstraintLayer() {
   const meshRef = useRef();
 
   useFrame((state, delta) => {
     if (meshRef.current) {
+      // Slow rotation for visual fidelity
       meshRef.current.rotation.y += delta * 0.01;
       meshRef.current.rotation.x += delta * 0.005;
     }
   });
 
   return (
-    <mesh ref={meshRef} position={[0, 0, 0]} renderOrder={0}> {/* Rendered first, in the background */}
+    <mesh ref={meshRef} position={[0, 0, 0]}>
       <dodecahedronGeometry args={[5.5, 0]} /> 
       <meshBasicMaterial 
         color="#00ffff"
         wireframe={true} 
-        transparent={true} // Re-enabled for subtle rendering
-        opacity={0.05}     // Low opacity so it doesn't obscure other elements
+        transparent={true}
+        opacity={0.15}
       />
     </mesh>
   );
@@ -64,9 +84,11 @@ function ManifoldConstraintLayer() {
 // 1. The GΛLYPH NODE Component
 function GlyphNode({ position, color, name, onClick }) {
   const meshRef = useRef()
+  const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
     if (meshRef.current) {
+      // Faster, pulsing rotation
       meshRef.current.rotation.x += delta * 0.2
       meshRef.current.rotation.y += delta * 0.1
     }
@@ -74,26 +96,17 @@ function GlyphNode({ position, color, name, onClick }) {
 
   return (
     <group position={position} onClick={onClick}>
-      {/* Icosahedron Mesh - Rendered on top of manifold and lines */}
-      <mesh ref={meshRef} renderOrder={2}> 
+      {/* Icosahedron Mesh - The Glyptic Core */}
+      <mesh ref={meshRef}>
         <icosahedronGeometry args={[0.4, 0]} /> 
         <meshBasicMaterial color={color} wireframe />
       </mesh>
       
-      {/* Text Component */}
-      <Text 
-        position={[0, 1.0, 0]} 
-        fontSize={0.4}
-        color={color}
-        font="https://fonts.gstatic.com/s/monofett/v20/6cTfajD9fU82RDPvDTS_e0c.woff" 
-        anchorX="center"
-        anchorY="middle"
-        billboard={true} 
-        depthTest={false} // Ensure text always renders on top regardless of depth
-        renderOrder={3}  // Render text last
-      >
-        {name}
-      </Text>
+      {/* Text Mesh using Canvas Texture - The Identity Layer */}
+      <mesh position={[0, 0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[5.0, 0.8]} /> 
+        <meshBasicMaterial map={texture} transparent />
+      </mesh>
     </group>
   )
 }
@@ -103,12 +116,14 @@ function BackgroundSpawner({ onSpawn }) {
   const handleClick = useCallback((e) => {
     e.stopPropagation() 
     if (e.point) {
+      // Round the coordinates for cleaner Firestore data
       const pos = e.point.toArray().map(v => parseFloat(v.toFixed(2))); 
       onSpawn(pos);
     }
   }, [onSpawn])
 
   return (
+    // Invisible plane spanning the view to capture clicks
     <mesh onClick={handleClick}>
       <planeGeometry args={[200, 200]} /> 
       <meshBasicMaterial visible={false} />
@@ -126,6 +141,7 @@ export default function App() {
   const [userId, setUserId] = useState(null);
   const [ragIndex, setRagIndex] = useState(0);
 
+  // Derive readiness state for the button
   const isReady = db && userId && !loading;
 
   // --- 1. FIREBASE INITIALIZATION AND AUTH ---
@@ -149,11 +165,13 @@ export default function App() {
 
       const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
       
+      // Handle authentication state change
       const handleAuth = (user) => {
         if (user) {
           setUserId(user.uid);
           console.log("Authenticated with UID:", user.uid);
         } else {
+          // If no user is signed in, sign in anonymously
           signInAnonymously(auth).then(anonUser => {
             setUserId(anonUser.user.uid);
             console.log("Signed in anonymously with UID:", anonUser.user.uid);
@@ -166,8 +184,10 @@ export default function App() {
 
       authListener = onAuthStateChanged(auth, handleAuth);
 
+      // Attempt custom token sign-in first if token exists
       if (token) {
         signInWithCustomToken(auth, token).catch(e => {
+          // If custom token fails, onAuthStateChanged fallback will handle it
           console.error("Custom token sign-in failed. Falling back to onAuthStateChanged.", e);
         });
       }
@@ -177,6 +197,7 @@ export default function App() {
       setLoading(false);
     }
     
+    // Cleanup the auth listener on unmount
     return () => {
       if (authListener) authListener();
     };
@@ -184,12 +205,15 @@ export default function App() {
 
   // --- 2. FIRESTORE DATA LISTENER AND INITIALIZER ---
   useEffect(() => {
+    // Only proceed if DB object is initialized and Auth state has been checked
     if (!db || !authReady) return;
 
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    // Use the PUBLIC data path
     const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
     const docRef = doc(db, docPath);
 
+    // Function to set initial state if document doesn't exist
     const initializeState = async () => {
         try {
             await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false });
@@ -206,11 +230,17 @@ export default function App() {
         setConstraints(data.constraints || []);
         console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
       } else {
+        // Document doesn't exist, initialize it:
+        // 1. Set local state immediately for visual feedback (THE FIX)
         setNodes(INITIAL_SYSTEM_STATE.nodes);
         setConstraints(INITIAL_SYSTEM_STATE.constraints);
+        
+        // 2. Initialize the document in Firestore
         initializeState(); 
+        
         console.log("Document missing. Initializing local state and writing to Firestore.");
       }
+      // Data is either successfully retrieved or initialization is triggered, so stop loading
       setLoading(false); 
     }, (error) => {
       console.error("Firestore snapshot failed:", error);
@@ -221,8 +251,9 @@ export default function App() {
   }, [db, authReady]);
   
   
-  // --- RAG INGESTION HANDLER ---
+  // --- RAG INGESTION HANDLER (Adds next artifact from the predefined list) ---
   const handleRAGIngestion = useCallback(async () => {
+    // Guard clause to prevent execution before setup is complete
     if (!isReady) {
         console.warn("System not ready for RAG ingestion. Waiting for DB/Auth lock.");
         return; 
@@ -230,31 +261,37 @@ export default function App() {
 
     const artifact = RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length];
     
+    // Create new node object
     const newNode = {
       id: artifact.name.replace(/\s/g, '-').toLowerCase(),
       name: artifact.name,
       color: artifact.color,
+      // Use the predefined position from the RAG_ARTIFACTS list
       position: artifact.pos, 
       type: artifact.type,
       timestamp: Date.now()
     };
 
+    // Create new constraint objects linking to the Axiomatic foundations
     const newConstraints = artifact.links.map(linkId => ([
       newNode.id, linkId, newNode.color 
     ]));
 
+    // Update Firestore
     try {
       const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
       const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
       const docRef = doc(db, docPath);
 
+      // Ensure no duplicate nodes are added (by ID), then append the new node.
       const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
+      // Append new constraints
       const allConstraints = [...constraints, ...newConstraints];
 
       await setDoc(docRef, {
         nodes: uniqueNodes,
         constraints: allConstraints
-      }, { merge: false });
+      }, { merge: false }); // Overwrite the arrays completely with the new set
 
       setRagIndex(i => i + 1);
       console.log(`Ingested new RAG artifact: ${newNode.name}`);
@@ -264,7 +301,7 @@ export default function App() {
   }, [db, userId, nodes, constraints, isReady, ragIndex]);
 
 
-  // HIL Input Handler
+  // HIL Input Handler (Spawning new nodes via user click)
   const handleSpawn = useCallback(async (pos) => {
     if (!isReady) return;
     
@@ -278,10 +315,12 @@ export default function App() {
       timestamp: Date.now()
     }
     
+    // Link new node to a random existing axiomatic node (rag-orch, glyph-eng, vgm-anchor, manifold, hax)
     const axiomaticIds = INITIAL_SYSTEM_STATE.nodes.map(n => n.id);
     const existingNodeId = axiomaticIds[Math.floor(Math.random() * axiomaticIds.length)];
     const newConstraint = [newId, existingNodeId, 'white']; 
 
+    // Update Firestore via setDoc to trigger snapshot listener
     try {
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
@@ -304,6 +343,7 @@ export default function App() {
 
   // Utility to find node position by ID
   const nodeMap = useMemo(() => {
+    // Map node ID to its position vector [x, y, z]
     return new Map(nodes.map(node => [node.id, node.position]));
   }, [nodes]);
 
@@ -369,7 +409,7 @@ export default function App() {
         <p className="text-sm mb-2 text-lime-300">RAG Pipeline Control (Simulate Ingestion)</p>
         <button 
           onClick={handleRAGIngestion}
-          disabled={!isReady} 
+          disabled={!isReady} // Disable button until ready
           className={`px-4 py-2 transition duration-150 rounded-full text-white font-bold text-lg shadow-xl ${
             isReady 
               ? 'bg-indigo-700 hover:bg-indigo-600' 
@@ -417,21 +457,6 @@ export default function App() {
         {/* --- Manifold Constraint Layer (Boundary) --- */}
         <ManifoldConstraintLayer />
 
-        {/* Render Lattice Constraints (Wires) - Rendered at order 1 */}
-        {linePoints.map(({ points, color }, index) => (
-          <Line
-            key={index}
-            points={points}
-            color={color} 
-            lineWidth={4}
-            dashed={false}
-            transparent={true} 
-            opacity={1.0}
-            depthTest={false} // Crucial for line visibility over large meshes
-            renderOrder={1} // Render lines after manifold (0)
-          />
-        ))}
-
         {/* Render all GΛLYPH Nodes (Axiomatic and RAG-Derived) */}
         {nodes.map(node => (
           <GlyphNode 
@@ -442,6 +467,17 @@ export default function App() {
             onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
           />
         ))}
+
+        {/* Render Lattice Constraints (Wires) */}
+        {linePoints.map(({ points, color }, index) => (
+          <Line
+            key={index}
+            points={points}
+            color={color} 
+            lineWidth={2}
+            dashed={false}
+          />
+        ))}
         
         {/* HIL Input Spawner (Click on background to spawn a new HIL node) */}
         <BackgroundSpawner onSpawn={handleSpawn} />
@@ -450,4 +486,3 @@ export default function App() {
     </div>
   )
 }
-
