@@ -16,16 +16,15 @@ const CAMERA_FOV = 60;
 
 // Base camera distances used by ResponsiveCamera
 const LANDSCAPE_Z = 25; 
-const PORTRAIT_Z = 160; 
-const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // ~6.4
+const PORTRAIT_Z = 70; // FIXED: Adjusted from 160 to 70 for better mobile visibility/raycasting
+const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // Now 70 / 25 = 2.8
+// Scaling fix
+const FINAL_SMALL_SCALE = 1 / Z_RATIO; 
 
 // Geometric size constants. 
 const BASE_NODE_RADIUS = 3.0;
 const BASE_LABEL_SIZE = 1.5;
 const BASE_LINE_WIDTH = 4.0;
-
-// Scaling fix
-const FINAL_SMALL_SCALE = 1 / Z_RATIO; 
 
 // Firestore collection path for shared Axiomatic Nodes
 const AXIOM_NODE_COLLECTION_NAME = 'axiom_nodes';
@@ -51,7 +50,7 @@ const INITIAL_SYSTEM_STATE = {
 };
 
 // --- CAMERA CONTROLLER & SIZE STATE ---
-function ResponsiveCamera({ setAspect }) {
+function ResponsiveCamera({ setAspect, isTerminalOpen }) {
   const { camera, size } = useThree();
   const controlsRef = useRef();
 
@@ -84,6 +83,8 @@ function ResponsiveCamera({ setAspect }) {
       minDistance={5} 
       maxDistance={200}
       enablePan={false}
+      // FIX: Disable controls when the terminal is open
+      enabled={!isTerminalOpen} 
     />
   );
 }
@@ -220,9 +221,12 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
     }
   })
 
+  // IMPORTANT: Clicks on R3F objects are raycast events, they fire reliably.
   const handleClick = useCallback((e) => {
+    // Stop propagation so the raycast doesn't register a hit on other objects behind this one,
+    // although for the terminal, the key is preventing OrbitControls interference.
     e.stopPropagation(); 
-    onSelect(id); // Now calls the function to open the terminal
+    onSelect(id); // Calls the function to open the terminal
   }, [id, onSelect]);
 
   return (
@@ -234,7 +238,7 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
         <meshBasicMaterial color={color} wireframe thickness={0.15 * orientationScale} />
       </mesh>
       
-      {/* 2. Transparent Sphere (Click target) */}
+      {/* 2. Transparent Sphere (Click target) - Ensures a slightly larger hit area */}
       <mesh>
         <sphereGeometry args={[nodeScale * 1.1, 16, 16]} />
         <meshBasicMaterial color={color} transparent opacity={0.0} /> 
@@ -286,7 +290,7 @@ function TerminalOverlay({ selectedNodeId, closeTerminal, nodes }) {
               onClick={closeTerminal} 
               className="text-white hover:text-red-500 transition-colors p-1 rounded"
             >
-              <svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
         </div>
@@ -486,7 +490,7 @@ export default function App() {
       
       {/* 3D Canvas */}
       <Canvas dpr={[1, 2]} camera={{ fov: CAMERA_FOV }}>
-        <ResponsiveCamera setAspect={setAspect} />
+        <ResponsiveCamera setAspect={setAspect} isTerminalOpen={!!selectedNodeId} />
         
         <ParticlePlanet />
 
