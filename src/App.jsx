@@ -44,12 +44,14 @@ function createTextTexture(text, color, fontSize = 64) {
   
   canvas.width = 2048; 
   canvas.height = 128; 
-
-  context.font = `Bold ${fontSize}px monospace`;
-  context.fillStyle = color;
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.fillText(text, canvas.width / 2, canvas.height / 2);
+  
+  if (context) {
+    context.font = `Bold ${fontSize}px monospace`;
+    context.fillStyle = color;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(text, canvas.width / 2, canvas.height / 2);
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
@@ -161,6 +163,32 @@ export default function App() {
     nodes.find(n => n.id === selectedNodeId)
   , [nodes, selectedNodeId]);
 
+
+  // --- 0. VISUAL FIX: Ensure Body is Dark and Full Screen ---
+  // This addresses the issue of a blank/white screen when the host page environment
+  // doesn't correctly apply height/background from the root React div.
+  useEffect(() => {
+    // Save original styles for cleanup
+    const originalBodyBg = document.body.style.backgroundColor;
+    const originalHtmlBg = document.documentElement.style.backgroundColor;
+    const originalBodyHeight = document.body.style.height;
+    const originalHtmlHeight = document.documentElement.style.height;
+
+    // Force dark background and full height on the host page body and html
+    document.body.style.backgroundColor = '#0a0a0a'; // Dark background
+    document.documentElement.style.backgroundColor = '#0a0a0a';
+    document.body.style.height = '100dvh'; // Use dvh for modern mobile support
+    document.documentElement.style.height = '100dvh';
+
+    // Cleanup function to restore original styles on unmount
+    return () => {
+        document.body.style.backgroundColor = originalBodyBg;
+        document.documentElement.style.backgroundColor = originalHtmlBg;
+        document.body.style.height = originalBodyHeight;
+        document.documentElement.style.height = originalHtmlHeight;
+    };
+  }, []);
+  
   // --- 1. FIREBASE INITIALIZATION AND AUTH ---
   useEffect(() => {
     let authListener;
@@ -233,7 +261,8 @@ export default function App() {
     // Function to set initial state if document doesn't exist
     const initializeState = async () => {
         try {
-            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false });
+            // Use setDoc with merge: false to guarantee the entire object is written
+            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false }); 
             console.log("Initialized Axiomatic State in Firestore.");
         } catch (e) {
             console.error("Error setting initial state:", e);
@@ -252,7 +281,7 @@ export default function App() {
         console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
       } else {
         // Document doesn't exist, initialize it:
-        // 1. Set local state immediately for visual feedback (THE FIX)
+        // 1. Set local state immediately for visual feedback
         setNodes(INITIAL_SYSTEM_STATE.nodes);
         setConstraints(INITIAL_SYSTEM_STATE.constraints);
         
@@ -601,3 +630,4 @@ export default function App() {
     </div>
   )
 }
+
