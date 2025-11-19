@@ -11,6 +11,7 @@ const NODE_DATA = [
   { id: 'node-3', name: 'Glyph Engine', position: [0, 5, 0], color: 'magenta', memory: 'Glyph Engine Status: IDLE. Axiom Count: 5. Glyph storage: /artifacts/capsuleos/users/userId/glyphs. Next operation: Awaiting new document ingress. Core function: Axiomatic data generation. Status: OK.' },
 ];
 const CONNECTION_COLOR = '#0f766e'; // Teal
+const TERMINAL_COLOR = '#38bdf8'; // Sky Blue
 
 // --- UTILITY COMPONENTS ---
 
@@ -99,8 +100,8 @@ const GlyphNode = React.memo(({ id, position, color, name, isSelected, onSelect 
   );
 });
 
-// Component to handle background clicks for potential spawning (currently non-functional)
-const BackgroundSpawner = ({ onSpawn }) => {
+// Component to handle background clicks
+const BackgroundSpawner = () => {
     const { gl } = useThree();
     
     // Disable the right-click context menu within the canvas
@@ -110,13 +111,10 @@ const BackgroundSpawner = ({ onSpawn }) => {
         return () => gl.domElement.removeEventListener('contextmenu', handleContextMenu);
     }, [gl]);
 
-    // Current implementation is a NO-OP, as requested by the user, 
-    // but the component placeholder remains.
+    // Current implementation is a NO-OP for spawning, as requested.
     const handleClick = useCallback((event) => {
-        // Stop propagation so controls don't trigger.
         event.stopPropagation(); 
-        // We do not implement the spawning logic yet, but the handler is here.
-        console.log("Background clicked. Spawning feature is currently disabled.");
+        // console.log("Background clicked. Spawning feature is currently disabled.");
     }, []);
 
     return (
@@ -130,9 +128,6 @@ const BackgroundSpawner = ({ onSpawn }) => {
 // --- HIL INTERVENTION PANEL ---
 const HILInterventionPanel = ({ content, onClose }) => {
   const panelRef = useRef();
-  
-  // Use a different color for the terminal-style output
-  const terminalColor = '#38bdf8'; // Sky Blue
   
   if (!content) return null;
 
@@ -155,8 +150,9 @@ const HILInterventionPanel = ({ content, onClose }) => {
       </div>
 
       <pre 
-        className={`text-sm font-mono text-[${terminalColor}] whitespace-pre-wrap h-40 overflow-y-auto bg-black/50 p-2 rounded`}
-        style={{ color: terminalColor }} // Tailwind colors are hard to use dynamically, force style
+        className="text-sm font-mono whitespace-pre-wrap h-40 overflow-y-auto bg-black/50 p-2 rounded"
+        // FIXED: Using style attribute for dynamic color to prevent Tailwind build failure
+        style={{ color: TERMINAL_COLOR }} 
       >
         {content}
       </pre>
@@ -173,8 +169,6 @@ const HILInterventionPanel = ({ content, onClose }) => {
               // Simulate command execution for now
               const command = e.target.value;
               console.log(`Executing command: ${command}`);
-              // In the future, this would send a request to the backend
-              // For now, we clear the input and log.
               e.target.value = '';
             }
           }}
