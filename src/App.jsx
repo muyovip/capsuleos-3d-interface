@@ -9,17 +9,18 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
 // --- CONFIGURATION ---
-const PARTICLE_COUNT_INNER = 20000; // Reduced slightly for mobile stability
+// Boosted particle count for "Galaxy" density
+const PARTICLE_COUNT_INNER = 20000;
 const PARTICLE_COUNT_OUTER = 40000;
 
 // --- AXIOMATIC DATA ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
-    { id: 'rag-orch', name: 'Multi-Agent RAG', color: '#00ffff', position: [3.5, 1.0, 0] }, // Cyan
-    { id: 'glyph-eng', name: 'GΛLYPH Engine', color: '#32cd32', position: [-3.5, 1.0, 0] }, // Lime
+    { id: 'rag-orch', name: 'Multi-Agent RAG', color: '#00ffff', position: [3.5, 1.0, 0] },
+    { id: 'glyph-eng', name: 'GΛLYPH Engine', color: '#32cd32', position: [-3.5, 1.0, 0] },
     { id: 'vgm-anchor', name: 'VGM Anchor', color: '#00ffff', position: [0, 4.0, -2.0] },
     { id: 'manifold', name: 'Manifold Constraint', color: '#32cd32', position: [0, -4.0, 2.0] },
-    { id: 'hax', name: 'HIL Agent X', color: '#ffaa00', position: [4.5, -1.0, -1.0] }, // Orange
+    { id: 'hax', name: 'HIL Agent X', color: '#ffaa00', position: [4.5, -1.0, -1.0] },
   ],
   constraints: [
     ['rag-orch', 'glyph-eng', '#32cd32'],
@@ -30,7 +31,7 @@ const INITIAL_SYSTEM_STATE = {
   ],
 };
 
-// --- PARTICLE PLANET SHADER MATERIAL (Ported from Builder.io Blog) ---
+// --- PARTICLE PLANET SHADER MATERIAL ---
 const ParticleShaderMaterial = {
   vertexShader: `
     uniform float time;
@@ -55,7 +56,8 @@ const ParticleShaderMaterial = {
       vColor = mix(color1, color2, d);
       
       vec4 mvPosition = modelViewMatrix * vec4(newPos, 1.0);
-      gl_PointSize = sizes * (10.0 / -mvPosition.z);
+      // Increased size multiplier (20.0) for mobile visibility
+      gl_PointSize = sizes * (20.0 / -mvPosition.z);
       gl_Position = projectionMatrix * mvPosition;
     }
   `,
@@ -91,7 +93,8 @@ function ParticlePlanet() {
       positions[ptr * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       positions[ptr * 3 + 2] = r * Math.cos(phi);
       
-      sizes[ptr] = Math.random() * 1.5 + 0.5;
+      // Larger particles for core
+      sizes[ptr] = Math.random() * 2.0 + 1.0; 
       shifts[ptr * 4] = Math.random() * Math.PI;
       shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
       shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
@@ -99,7 +102,7 @@ function ParticlePlanet() {
       ptr++;
     }
 
-    // Outer Shell (Toroidal distribution)
+    // Outer Shell (Galaxy Ring)
     for (let i = 0; i < PARTICLE_COUNT_OUTER; i++) {
       const r = 10; 
       const R = 40;
@@ -114,7 +117,7 @@ function ParticlePlanet() {
       positions[ptr * 3 + 1] = v.y;
       positions[ptr * 3 + 2] = v.z;
       
-      sizes[ptr] = Math.random() * 1.5 + 0.5;
+      sizes[ptr] = Math.random() * 2.0 + 1.0;
       shifts[ptr * 4] = Math.random() * Math.PI;
       shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
       shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
@@ -129,7 +132,7 @@ function ParticlePlanet() {
     if (mesh.current) {
       mesh.current.material.uniforms.time.value = state.clock.elapsedTime;
       mesh.current.rotation.y = state.clock.elapsedTime * 0.05;
-      mesh.current.rotation.z = 0.2; // Tilt the planet
+      mesh.current.rotation.z = 0.2; 
     }
   });
 
@@ -152,7 +155,7 @@ function ParticlePlanet() {
   );
 }
 
-// --- AXIOMATIC NODE COMPONENT (Visual Satellites) ---
+// --- AXIOMATIC NODE COMPONENT ---
 function GlyphNode({ id, position, color, name, onSelect }) {
   const meshRef = useRef()
   
@@ -170,19 +173,14 @@ function GlyphNode({ id, position, color, name, onSelect }) {
 
   return (
     <group position={position} onClick={handleClick}>
-      {/* The Physical Node */}
       <mesh ref={meshRef}>
         <icosahedronGeometry args={[0.6, 0]} /> 
         <meshBasicMaterial color={color} wireframe thickness={0.1} />
       </mesh>
-      
-      {/* Glow Halo */}
       <mesh>
         <sphereGeometry args={[0.65, 16, 16]} />
         <meshBasicMaterial color={color} transparent opacity={0.1} />
       </mesh>
-
-      {/* Label (Always facing camera) */}
       <group position={[0, 0.9, 0]}>
          <Text
             fontSize={0.3}
@@ -204,13 +202,10 @@ export default function App() {
   const [nodes, setNodes] = useState(INITIAL_SYSTEM_STATE.nodes)
   const [constraints, setConstraints] = useState(INITIAL_SYSTEM_STATE.constraints)
   
-  // Simple Node Selection for HIL verification
   const handleNodeSelect = (id) => {
     console.log("Axiomatic Node Selected:", id);
-    // Placeholder for opening the RAG Terminal for this node
   }
 
-  // Map positions for lines
   const linePoints = useMemo(() => {
     const nodeMap = new Map(nodes.map(n => [n.id, n.position]));
     const points = [];
@@ -227,8 +222,9 @@ export default function App() {
   }, [nodes, constraints]);
 
   return (
-    <div className="w-screen h-screen bg-black">
-      {/* CEX View: HUD Overlay */}
+    // FIXED: Use 100dvh and fixed positioning for absolute mobile coverage
+    <div className="fixed inset-0 w-screen h-[100dvh] bg-black overflow-hidden">
+      {/* HUD Overlay */}
       <div style={{
         position: 'absolute', top: 20, left: 20, zIndex: 10,
         color: 'cyan', fontFamily: 'monospace', pointerEvents: 'none',
@@ -240,18 +236,16 @@ export default function App() {
       </div>
 
       {/* DEX View: 3D Graph */}
-      <Canvas camera={{ position: [0, 0, 18], fov: 45 }}>
+      <Canvas camera={{ position: [0, 2, 14], fov: 60 }}>
         <OrbitControls 
           enableDamping 
           dampingFactor={0.05} 
-          minDistance={10} 
+          minDistance={5} 
           maxDistance={50} 
         />
         
-        {/* The Fusion Particle System (The Manifold) */}
         <ParticlePlanet />
 
-        {/* Axiomatic Nodes (Satellites) */}
         {nodes.map(node => (
           <GlyphNode 
             key={node.id}
@@ -260,7 +254,6 @@ export default function App() {
           />
         ))}
 
-        {/* Lattice Constraints (Wires) */}
         {linePoints.map((l, i) => (
           <Line 
             key={i} 
