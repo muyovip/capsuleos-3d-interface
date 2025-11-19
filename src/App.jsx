@@ -1,6 +1,6 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, Line, Text } from '@react-three/drei'
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import * as THREE from 'three'
 
 // --- CONFIGURATION ---
@@ -14,15 +14,16 @@ const LANDSCAPE_Z = 25;
 const PORTRAIT_Z = 160; 
 const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // ~6.4
 
-// Scaling factor for visual pop in portrait mode (optional but good for visual feel)
-const SCALE_BOOST = 1.2;
-
-// Base size multiplier. Nodes will be scaled from this base.
+// Geometric size constants. These define the *base* size of the nodes.
 const BASE_NODE_RADIUS = 3.0;
 const BASE_LABEL_SIZE = 1.5;
 const BASE_LINE_WIDTH = 4.0;
 
-// --- AXIOMATIC DATA (Remains the same) ---
+// FINAL SCALING FIX: We use a small, constant scale factor for the geometric size 
+// across all orientations to ensure the Icosahedrons appear small.
+const FINAL_SMALL_SCALE = 1 / Z_RATIO; // Approx 0.156
+
+// --- AXIOMATIC DATA ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
     { id: 'rag-orch', name: 'Multi-Agent RAG', color: '#00ffff', position: [3.5, 1.0, 0] },
@@ -40,7 +41,7 @@ const INITIAL_SYSTEM_STATE = {
   ],
 };
 
-// --- CAMERA CONTROLLER & SIZE STATE (Updated Camera Z logic) ---
+// --- CAMERA CONTROLLER & SIZE STATE ---
 function ResponsiveCamera({ setAspect }) {
   const { camera, size } = useThree();
   const tanHalfFOV = useMemo(() => Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2)), []);
@@ -48,29 +49,26 @@ function ResponsiveCamera({ setAspect }) {
 
   useEffect(() => {
     const aspect = size.width / size.height;
-    const objectWidth = MAX_GALAXY_RADIUS * 2; 
-
-    const requiredZ = objectWidth / (2 * tanHalfFOV * aspect); 
     
-    let finalZ = requiredZ * 1.05;
-    finalZ = Math.min(Math.max(finalZ, 20), 200); 
+    // Default to PORTRAIT_Z (far)
+    let finalZ = PORTRAIT_Z;
 
     if (aspect > 1.2) {
-      finalZ = LANDSCAPE_Z; // Landscape is close
-    } else {
-        finalZ = PORTRAIT_Z; // Portrait is far
+      // Landscape mode: Camera is closer for a zoomed-in feel
+      finalZ = LANDSCAPE_Z; 
     }
-
-
+    
+    // Set camera position
     camera.position.set(0, 2, finalZ); 
     camera.updateProjectionMatrix();
     
+    // Update OrbitControls target
     if (controlsRef.current) {
       controlsRef.current.target.set(0, 0, 0);
       controlsRef.current.update();
     }
     
-    // Pass the aspect ratio up to the parent App component
+    // Pass the aspect ratio up to the main component
     setAspect(aspect);
 
   }, [size, camera, tanHalfFOV, setAspect]);
@@ -87,7 +85,7 @@ function ResponsiveCamera({ setAspect }) {
   );
 }
 
-// --- PARTICLE SHADER (remains the same) ---
+// --- PARTICLE SHADER ---
 const ParticleShaderMaterial = {
   vertexShader: `
     uniform float time;
@@ -95,19 +93,23 @@ const ParticleShaderMaterial = {
     attribute vec4 shift;
     varying vec3 vColor;
     void main() {
-      vec3 color1 = vec3(227., 155., 0.) / 255.; 
-      vec3 color2 = vec3(100., 50., 255.) / 255.; 
+      // Color constants for glow effect
+      vec3 color1 = vec3(227., 155., 0.) / 255.; // Orange
+      vec3 color2 = vec3(100., 50., 255.) / 255.; // Violet
       
       vec3 newPos = position;
+      // Movement logic
       float t = time;
       float moveT = mod(shift.x + shift.z * t, 6.28318); 
       float moveS = mod(shift.y + shift.z * t, 6.28318);
       newPos += vec3(cos(moveS) * sin(moveT), cos(moveT), sin(moveS) * sin(moveT)) * shift.w;
       
+      // Calculate color based on distance from center (normalized to 1)
       float d = length(abs(position) / vec3(${MAX_GALAXY_RADIUS}., 10., ${MAX_GALAXY_RADIUS}.));
       d = clamp(d, 0., 1.);
       vColor = mix(color1, color2, d);
       
+      // Standard point size calculation
       vec4 mvPosition = modelViewMatrix * vec4(newPos, 1.0);
       gl_PointSize = sizes * (30.0 / -mvPosition.z);
       gl_Position = projectionMatrix * mvPosition;
@@ -116,6 +118,7 @@ const ParticleShaderMaterial = {
   fragmentShader: `
     varying vec3 vColor;
     void main() {
+      // Fragment shader for creating circular, glowing particles
       float d = length(gl_PointCoord.xy - 0.5);
       if (d > 0.5) discard;
       gl_FragColor = vec4(vColor, smoothstep(0.5, 0.1, d));
@@ -123,7 +126,7 @@ const ParticleShaderMaterial = {
   `
 };
 
-// --- FUSION PARTICLE PLANET (remains the same) ---
+// --- FUSION PARTICLE PLANET ---
 function ParticlePlanet() {
     const mesh = useRef();
   
@@ -135,7 +138,7 @@ function ParticlePlanet() {
     
         let ptr = 0;
     
-        // Inner Core & Outer Shell Logic (omitted for brevity, remains unchanged)
+        // Inner Core Particles (Spherical distribution)
         for (let i = 0; i < PARTICLE_COUNT_INNER; i++) {
           const r = Math.random() * 3.0 + 8.0; 
           const theta = Math.random() * Math.PI * 2;
@@ -151,14 +154,15 @@ function ParticlePlanet() {
           ptr++;
         }
     
+        // Outer Shell Particles (Disc distribution)
         for (let i = 0; i < PARTICLE_COUNT_OUTER; i++) {
           const r = 12; 
           const R = MAX_GALAXY_RADIUS;
-          const rand = Math.pow(Math.random(), 1.5);
+          const rand = Math.pow(Math.random(), 1.5); // Density falls off with radius
           const radius = Math.sqrt(R * R * rand + (1 - rand) * r * r);
           const theta = Math.random() * 2 * Math.PI;
-          const y = (Math.random() - 0.5) * 12.0; 
-
+          const y = (Math.random() - 0.5) * 12.0; // Limited height
+          
           const v = new THREE.Vector3().setFromCylindricalCoords(radius, theta, y);
           
           positions[ptr * 3] = v.x;
@@ -178,7 +182,9 @@ function ParticlePlanet() {
     
       useFrame((state) => {
         if (mesh.current) {
+          // Pass time to shader uniforms for animation
           mesh.current.material.uniforms.time.value = state.clock.elapsedTime;
+          // Global slow rotation of the galaxy
           mesh.current.rotation.y = state.clock.elapsedTime * 0.05;
           mesh.current.rotation.z = 0.1; 
           mesh.current.rotation.x = -0.2; 
@@ -204,15 +210,15 @@ function ParticlePlanet() {
       );
 }
 
-// --- AXIOMATIC NODE (Fixed scale based on orientation) ---
+// --- AXIOMATIC NODE ---
 function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
   const meshRef = useRef();
 
-  // Scale is calculated by multiplying the base size by the factor determined in App
+  // Apply the universal small geometric scale
   const nodeScale = BASE_NODE_RADIUS * orientationScale;
   const labelScale = BASE_LABEL_SIZE * orientationScale;
 
-  // --- Animation and Click (remains the same) ---
+  // Rotation animation
   useFrame((state, delta) => {
     if (meshRef.current) {
       meshRef.current.rotation.x += delta * 0.2
@@ -220,6 +226,7 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
     }
   })
 
+  // Click handler
   const handleClick = useCallback((e) => {
     e.stopPropagation(); 
     onSelect(id);
@@ -262,12 +269,14 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
 export default function App() {
   const [nodes] = useState(INITIAL_SYSTEM_STATE.nodes);
   const [constraints] = useState(INITIAL_SYSTEM_STATE.constraints);
+  // Aspect ratio is captured here to determine camera state
   const [aspect, setAspect] = useState(1); 
 
   const handleNodeSelect = (id) => {
     console.log("Node Selected:", id);
   }
 
+  // Pre-calculate line points for the constraints lattice
   const linePoints = useMemo(() => {
     const nodeMap = new Map(nodes.map(n => [n.id, n.position]));
     const points = [];
@@ -283,21 +292,8 @@ export default function App() {
     return points;
   }, [nodes, constraints]);
 
-  // FIX: Calculate the scale factor based on orientation.
-  
-  let orientationScale = 1.0; 
-  
-  if (aspect > 1.2) {
-    // 1. LANDSCAPE (Aspect > 1.2): Camera is CLOSE (Z=25). 
-    // To keep visual size constant, geometric size must be scaled DOWN by Z_RATIO.
-    orientationScale = (1 / Z_RATIO) * SCALE_BOOST; 
-  } else {
-    // 2. PORTRAIT (Aspect < 1.2): Camera is FAR (Z=160).
-    // To keep visual size constant, geometric size must be scaled UP by the Z_RATIO.
-    // However, since we are using 1.0 as the base, we only need a small boost.
-    orientationScale = 1.0 * SCALE_BOOST; 
-  }
-
+  // Use the constant small scale factor for both views, achieving the desired small geometric size.
+  const orientationScale = FINAL_SMALL_SCALE;
   const dynamicLineWidth = BASE_LINE_WIDTH * orientationScale;
 
   return (
@@ -307,13 +303,13 @@ export default function App() {
         inset: 0, 
         width: '100vw', 
         height: '100vh',
-        height: '100lvh',
-        height: '100svh', 
+        height: '100lvh', // For small viewport units
+        height: '100svh', // For dynamic viewport units
         cursor: 'pointer'
       }} 
       className="bg-black overflow-hidden touch-none"
     >
-      {/* HUD (omitted for brevity, remains unchanged) */}
+      {/* Heads-Up Display (HUD) */}
       <div style={{
         position: 'absolute', top: 20, left: 20, zIndex: 10,
         color: 'cyan', fontFamily: 'monospace', pointerEvents: 'none',
@@ -327,24 +323,26 @@ export default function App() {
       <Canvas dpr={[1, 2]} camera={{ fov: CAMERA_FOV }}>
         <ResponsiveCamera setAspect={setAspect} />
         
+        {/* The dynamic background particle system */}
         <ParticlePlanet />
 
+        {/* Axiomatic Nodes */}
         {nodes.map(node => (
           <GlyphNode 
             key={node.id}
             {...node}
             onSelect={handleNodeSelect}
-            orientationScale={orientationScale} // Pass orientation scale factor
+            orientationScale={orientationScale} 
           />
         ))}
 
-        {/* Dynamic Line Width (Lattice Constraints) */}
+        {/* Lattice Constraints (Lines) */}
         {linePoints.map((l, i) => (
           <Line 
             key={i} 
             points={[l.start, l.end]} 
             color={l.color} 
-            lineWidth={dynamicLineWidth} // Use orientation scale
+            lineWidth={dynamicLineWidth} 
             transparent 
             opacity={0.5} 
           />
@@ -354,137 +352,3 @@ export default function App() {
   )
 }
 
-// --- CONFIGURATION ---
-// ... (The top of the file remains unchanged)
-
-// Base camera distances used by ResponsiveCamera
-const LANDSCAPE_Z = 25; 
-const PORTRAIT_Z = 160; 
-const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // ~6.4
-
-// Scaling factor for visual pop in portrait mode (optional but good for visual feel)
-// We will now use this to fine-tune the size instead of boosting it.
-const TARGET_NODE_SCALE = 0.5; // New constant to define the desired small size.
-
-// Base size multiplier. Nodes will be scaled from this base.
-const BASE_NODE_RADIUS = 3.0;
-const BASE_LABEL_SIZE = 1.5;
-const BASE_LINE_WIDTH = 4.0;
-
-// ... (The rest of the file down to the App component remains unchanged)
-
-
-// --- MAIN APP ---
-export default function App() {
-  const [nodes] = useState(INITIAL_SYSTEM_STATE.nodes);
-  const [constraints] = useState(INITIAL_SYSTEM_STATE.constraints);
-  const [aspect, setAspect] = useState(1); 
-
-  // ... (handleNodeSelect and linePoints remain unchanged)
-
-  // FIX: Calculate the scale factor based on orientation.
-  
-  let orientationScale = 1.0; 
-  
-  if (aspect > 1.2) {
-    // 1. LANDSCAPE (Aspect > 1.2): Camera is CLOSE (Z=25). 
-    // We want the nodes to be small. We use the TARGET_NODE_SCALE.
-    orientationScale = TARGET_NODE_SCALE;
-  } else {
-    // 2. PORTRAIT (Aspect < 1.2): Camera is FAR (Z=160).
-    // To achieve the same small *visual* size as Landscape (Z=25, scale=0.5), 
-    // we must multiply the Landscape scale (0.5) by the Z_RATIO (~6.4) to compensate
-    // for the distance. 
-    // However, since the camera is already adjusted to be far away, 
-    // we only need to apply the TARGET_NODE_SCALE.
-    orientationScale = TARGET_NODE_SCALE;
-  }
-
-  // The Landscape camera is closer, which means the nodes LOOK bigger by default.
-  // The Portrait camera is farther, which means the nodes LOOK smaller by default.
-  // BUT the ResponsiveCamera forces the Z distance based on aspect ratio.
-
-  // The actual fix is to keep the geometric scale small and let the ResponsiveCamera
-  // do the framing, which implicitly sets the visual size.
-
-  if (aspect > 1.2) {
-      // Landscape: Camera is Z=25. The nodes are 6.4x closer. Scale DOWN geometric size.
-      orientationScale = 1 / Z_RATIO;
-  } else {
-      // Portrait: Camera is Z=160. Scale up to compensate for distance (if desired),
-      // or keep a medium size. We want the nodes to be small. 
-      // The ratio (1/Z_RATIO) worked well for the visual size in Landscape.
-      // We will now use that same small base scale for Portrait.
-      orientationScale = 1 / Z_RATIO;
-  }
-  
-  // Final, simpler approach that should work:
-  // Apply a small constant scale in both cases, which is what worked for Landscape.
-  const FINAL_SMALL_SCALE = 1 / Z_RATIO; // This is the small factor that worked for Landscape
-  orientationScale = FINAL_SMALL_SCALE;
-  // If the nodes are too small now in Portrait, uncomment the Portrait override below:
-  /*
-  if (aspect < 1.2) {
-      // If Portrait is too small, increase its scale to compensate for the far camera.
-      // This is the source of our original problem, so we avoid it unless necessary.
-      // Let's stick with the FINAL_SMALL_SCALE for both for now.
-  }
-  */
-
-  const dynamicLineWidth = BASE_LINE_WIDTH * orientationScale;
-
-
-  return (
-    // ... (The return block remains unchanged) ...
-    <div 
-      style={{ 
-        position: 'fixed', 
-        inset: 0, 
-        width: '100vw', 
-        height: '100vh',
-        height: '100lvh',
-        height: '100svh', 
-        cursor: 'pointer'
-      }} 
-      className="bg-black overflow-hidden touch-none"
-    >
-      {/* HUD (omitted for brevity, remains unchanged) */}
-      <div style={{
-        position: 'absolute', top: 20, left: 20, zIndex: 10,
-        color: 'cyan', fontFamily: 'monospace', pointerEvents: 'none',
-        textShadow: '0 0 10px cyan'
-      }}>
-        CAPSULE OS | **DEX View** <br/>
-        Status: IMMERSION LOCK <br/>
-        Input: TOUCH ENABLED
-      </div>
-
-      <Canvas dpr={[1, 2]} camera={{ fov: CAMERA_FOV }}>
-        <ResponsiveCamera setAspect={setAspect} />
-        
-        <ParticlePlanet />
-
-        {nodes.map(node => (
-          <GlyphNode 
-            key={node.id}
-            {...node}
-            onSelect={handleNodeSelect}
-            orientationScale={orientationScale} // Use the FINAL_SMALL_SCALE for both
-          />
-        ))}
-
-        {/* Dynamic Line Width (Lattice Constraints) */}
-        {linePoints.map((l, i) => (
-          <Line 
-            key={i} 
-            points={[l.start, l.end]} 
-            color={l.color} 
-            lineWidth={dynamicLineWidth} // Use orientation scale
-            transparent 
-            opacity={0.5} 
-          />
-        ))}
-      </Canvas>
-    </div>
-  )
-}
