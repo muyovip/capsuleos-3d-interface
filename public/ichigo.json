@@ -1,0 +1,12 @@
+{
+  "id": "char-001",
+  "name": "Ichigo Kurosaki",
+  "type": "character",
+  "visuals": {
+    "color": "#FF4500",
+    "wireframe": true,
+    "scale": 1.2
+  },
+  "memory": "I am a Substitute Soul Reaper. My Bankai is Tensa Zangetsu.",
+  "position": [2, 0.5, 0]
+}
