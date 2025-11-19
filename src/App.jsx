@@ -15,11 +15,11 @@ setLogLevel('debug');
 // --- AXIOMATIC DATA ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
-    { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0] },
-    { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.0, 1.0, 0] },
-    { id: 'vgm-anchor', name: 'VGM Anchor', color: 'cyan', position: [0, 2.5, -1.5] },
-    { id: 'manifold', name: 'Manifold Constraint', color: 'lime', position: [0, -2.5, 1.5] },
-    { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [3, -0.5, -0.5] },
+    { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0], initial: true },
+    { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.0, 1.0, 0], initial: true },
+    { id: 'vgm-anchor', name: 'VGM Anchor', color: 'cyan', position: [0, 2.5, -1.5], initial: true },
+    { id: 'manifold', name: 'Manifold Constraint', color: 'lime', position: [0, -2.5, 1.5], initial: true },
+    { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [3, -0.5, -0.5], initial: true },
   ],
   constraints: [
     ['rag-orch', 'glyph-eng', 'lime'],
@@ -78,28 +78,39 @@ function ManifoldConstraintLayer() {
         opacity={0.15}
       />
     </mesh>
-  );
+  )
 }
 
 // 1. The GΛLYPH NODE Component
-function GlyphNode({ position, color, name, onClick }) {
+function GlyphNode({ position, color, name, onClick, isSelected }) {
   const meshRef = useRef()
   const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
     if (meshRef.current) {
-      // Faster, pulsing rotation
+      // Standard rotation
       meshRef.current.rotation.x += delta * 0.2
       meshRef.current.rotation.y += delta * 0.1
+
+      // Pulsing scale effect when selected (HIL Focus)
+      if (isSelected) {
+          const pulse = 1.0 + Math.sin(state.clock.elapsedTime * 8) * 0.15;
+          meshRef.current.scale.set(pulse, pulse, pulse);
+      } else {
+          meshRef.current.scale.set(1, 1, 1);
+      }
     }
   })
+  
+  // Change color when selected to a distinct magenta/pink
+  const coreColor = isSelected ? '#ff0077' : color;
 
   return (
-    <group position={position} onClick={onClick}>
+    <group position={position}>
       {/* Icosahedron Mesh - The Glyptic Core */}
-      <mesh ref={meshRef}>
+      <mesh ref={meshRef} onClick={onClick}>
         <icosahedronGeometry args={[0.4, 0]} /> 
-        <meshBasicMaterial color={color} wireframe />
+        <meshBasicMaterial color={coreColor} wireframe />
       </mesh>
       
       {/* Text Mesh using Canvas Texture - The Identity Layer */}
@@ -140,9 +151,15 @@ export default function App() {
   const [db, setDb] = useState(null);
   const [userId, setUserId] = useState(null);
   const [ragIndex, setRagIndex] = useState(0);
+  const [selectedNodeId, setSelectedNodeId] = useState(null); // New state for selection
 
   // Derive readiness state for the button
   const isReady = db && userId && !loading;
+
+  // Derive selected node data
+  const selectedNode = useMemo(() => 
+    nodes.find(n => n.id === selectedNodeId)
+  , [nodes, selectedNodeId]);
 
   // --- 1. FIREBASE INITIALIZATION AND AUTH ---
   useEffect(() => {
@@ -228,6 +245,10 @@ export default function App() {
         const data = docSnapshot.data();
         setNodes(data.nodes || []);
         setConstraints(data.constraints || []);
+        // Deselect node if it was just deleted by another user
+        if (selectedNodeId && !data.nodes.some(n => n.id === selectedNodeId)) {
+            setSelectedNodeId(null);
+        }
         console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
       } else {
         // Document doesn't exist, initialize it:
@@ -248,9 +269,57 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, [db, authReady]);
+  }, [db, authReady, selectedNodeId]);
   
   
+  // --- HIL INTERVENTION HANDLERS ---
+
+  // Handle a click on a GlyphNode to select/deselect it
+  const handleNodeClick = useCallback((nodeId) => {
+    // Toggle selection: if the same node is clicked, deselect; otherwise, select the new one.
+    setSelectedNodeId(nodeId === selectedNodeId ? null : nodeId); 
+  }, [selectedNodeId]);
+
+  // Handle node deletion
+  const handleNodeDelete = useCallback(async () => {
+    if (!isReady || !selectedNodeId) return;
+
+    const nodeToDelete = nodes.find(n => n.id === selectedNodeId);
+    if (!nodeToDelete) return;
+
+    // Prevent deletion of initial, axiomatic core nodes
+    if (nodeToDelete.initial) {
+      console.warn("Attempted to delete an initial axiomatic node. Operation blocked.");
+      return; 
+    }
+
+    try {
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
+        const docRef = doc(db, docPath);
+
+        // 1. Remove the node itself
+        const updatedNodes = nodes.filter(n => n.id !== selectedNodeId);
+        
+        // 2. Remove all constraints connected to the deleted node
+        const updatedConstraints = constraints.filter(([startId, endId]) => (
+            startId !== selectedNodeId && endId !== selectedNodeId
+        ));
+
+        await setDoc(docRef, {
+            nodes: updatedNodes,
+            constraints: updatedConstraints
+        }, { merge: false });
+
+        // Clear local selection state
+        setSelectedNodeId(null);
+        console.log(`Node ${selectedNodeId} and its constraints successfully deleted via HIL intervention.`);
+    } catch (e) {
+        console.error("Error deleting node:", e);
+    }
+  }, [db, nodes, constraints, selectedNodeId, isReady]);
+
+
   // --- RAG INGESTION HANDLER (Adds next artifact from the predefined list) ---
   const handleRAGIngestion = useCallback(async () => {
     // Guard clause to prevent execution before setup is complete
@@ -262,13 +331,14 @@ export default function App() {
     const artifact = RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length];
     
     // Create new node object
+    const newId = artifact.name.replace(/\s/g, '-').toLowerCase();
     const newNode = {
-      id: artifact.name.replace(/\s/g, '-').toLowerCase(),
+      id: newId,
       name: artifact.name,
       color: artifact.color,
-      // Use the predefined position from the RAG_ARTIFACTS list
       position: artifact.pos, 
       type: artifact.type,
+      authorId: userId, // Track creator
       timestamp: Date.now()
     };
 
@@ -312,6 +382,7 @@ export default function App() {
       color: 'white', 
       position: pos,
       type: 'HIL-Input',
+      authorId: userId, // Track creator
       timestamp: Date.now()
     }
     
@@ -395,6 +466,49 @@ export default function App() {
         <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
         <br/>Status: {isReady ? 'Persistent Grid Locked' : <span className="text-red-400">Syncing...</span>}
       </div>
+      
+      {/* Node Control Panel (CEX Panel) - New UI Element */}
+      {selectedNode && (
+        <div
+          className="absolute top-5 right-5 z-10 p-4 rounded-xl flex flex-col w-64"
+          style={{
+            color: 'white',
+            fontFamily: 'monospace',
+            background: 'rgba(50, 0, 70, 0.9)', // Dark purple background for control
+            fontSize: '14px',
+            boxShadow: '0 0 20px rgba(255, 0, 150, 0.8)' // Pink shadow for selected node
+          }}
+        >
+          <p className="text-lg font-bold mb-2 text-pink-400">HIL INTERVENTION PANEL</p>
+          <p className="truncate"><span className="text-cyan-300">Name:</span> {selectedNode.name}</p>
+          <p className="truncate"><span className="text-cyan-300">Type:</span> {selectedNode.type || 'Axiomatic'}</p>
+          <p className="truncate"><span className="text-cyan-300">Position:</span> ({selectedNode.position.join(', ')})</p>
+          <p className="truncate"><span className="text-cyan-300">Created:</span> {new Date(selectedNode.timestamp).toLocaleTimeString()}</p>
+          
+          <div className="mt-4 pt-3 border-t border-pink-700">
+            {selectedNode.initial ? (
+              <p className="text-yellow-400 text-xs">Axiomatic Core Node. Cannot be deleted.</p>
+            ) : (
+              <button 
+                onClick={handleNodeDelete}
+                className="w-full px-4 py-2 mt-2 transition duration-150 rounded-lg text-white font-bold bg-red-700 hover:bg-red-600 shadow-lg"
+                style={{ 
+                  boxShadow: '0 0 8px rgba(255, 0, 0, 0.8), inset 0 0 3px rgba(255, 255, 255, 0.5)'
+                }}
+              >
+                Terminate Glyph
+              </button>
+            )}
+            <button 
+              onClick={() => setSelectedNodeId(null)}
+              className="w-full px-4 py-1 mt-2 transition duration-150 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800"
+            >
+              Close Panel
+            </button>
+          </div>
+        </div>
+      )}
+
 
       {/* RAG Injection Control Panel (Bottom Right) */}
       <div 
@@ -464,7 +578,8 @@ export default function App() {
             position={node.position} 
             color={node.color} 
             name={node.name}
-            onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
+            isSelected={node.id === selectedNodeId}
+            onClick={(e) => { e.stopPropagation(); handleNodeClick(node.id); }} // Stop propagation to prevent accidental background click
           />
         ))}
 
@@ -486,3 +601,4 @@ export default function App() {
     </div>
   )
 }
+
