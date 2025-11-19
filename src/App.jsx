@@ -3,7 +3,7 @@ import { Canvas, useThree, useFrame, extend } from '@react-three/fiber';
 import { OrbitControls, Line } from '@react-three/drei';
 import * as THREE from 'three';
 
-// Import Firebase components
+// --- Firebase Imports ---
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { 
@@ -12,12 +12,10 @@ import {
   onSnapshot, 
   collection, 
   query, 
-  setDoc,
-  getDocs
+  setDoc
 } from 'firebase/firestore';
 
 // Extend LineGeometry and LineMaterial for Line component
-// This is necessary because react-three-fiber's Line is a wrapper around a specific Three.js implementation.
 extend({ OrbitControls });
 
 // --- Global Variables (Provided by Canvas Environment) ---
@@ -30,42 +28,34 @@ let app;
 let db;
 let auth;
 
-// State Structure for a GlyphNode
-/**
- * @typedef {object} Node
- * @property {string} id - Unique ID (e.g., Firestore Document ID)
- * @property {number[]} position - [x, y, z] coordinates
- * @property {string} color - Hex color string
- * @property {string} name - Label for the node
- * @property {string} [data] - Optional data payload from RAG (serialized JSON)
- */
-
-/**
- * @typedef {object} LineConnection
- * @property {THREE.Vector3[]} points - Array of two THREE.Vector3 objects
- * @property {string} color - Line color
- */
-
-
 // --- 3D Components ---
 
-// A single Glyph Node in the 3D space
+// Simplified Glyph Node (replaces original Capsule function)
 const GlyphNode = ({ id, position, color, name, isSelected, onSelect }) => {
   const meshRef = useRef();
   const [hovered, setHovered] = useState(false);
   const scale = isSelected ? 1.5 : (hovered ? 1.2 : 1.0);
 
-  // Animate the scale slightly when selected or hovered
-  useFrame(() => {
+  // Animation to maintain the "alive" feeling and responsiveness
+  useFrame((state) => {
+    const time = state.clock.getElapsedTime();
     if (meshRef.current) {
+      // Gentle bobbing motion
+      meshRef.current.position.y = position[1] + Math.sin(time + id) * 0.1;
+      
+      // Scale lerp
       meshRef.current.scale.lerp(new THREE.Vector3(scale, scale, scale), 0.1);
+      
+      // Slow, independent rotation
+      meshRef.current.rotation.x += 0.005;
+      meshRef.current.rotation.y += 0.008;
     }
   });
 
   return (
     <mesh
       ref={meshRef}
-      position={new THREE.Vector3(...position)}
+      position={[position[0], position[1], position[2]]} // Set initial position
       onClick={(e) => {
         e.stopPropagation();
         onSelect(id);
@@ -73,72 +63,31 @@ const GlyphNode = ({ id, position, color, name, isSelected, onSelect }) => {
       onPointerOver={() => setHovered(true)}
       onPointerOut={() => setHovered(false)}
     >
-      <sphereGeometry args={[0.2, 32, 32]} />
+      <sphereGeometry args={[0.2, 16, 16]} />
       <meshStandardMaterial 
-        color={isSelected ? '#FFFF00' : color} // Yellow when selected
-        emissive={color}
-        emissiveIntensity={hovered ? 0.6 : 0.2}
-        transparent
-        opacity={0.9}
+        color={isSelected ? '#FFFF00' : color} // Highlight color
+        wireframe={true}
+        emissive={isSelected ? '#FFFF00' : color}
+        emissiveIntensity={hovered ? 0.8 : 0.4}
       />
-      {/* Optional: Add a text label */}
-      <Text
-        position={[0, 0.4, 0]}
-        fontSize={0.2}
-        color="white"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {name}
-      </Text>
     </mesh>
   );
 };
 
-// Simple Text component (needs to be extended if we don't use Drei's Text)
-// Since we are using React Three Drei's Line, let's assume Text is also available or define a simple placeholder
-// For simplicity in a single file, we will assume a simple Mesh-based text if we can't fully import Text component.
-// Instead of importing Text, we'll use a standard mesh for the label for robustness.
-const Text = ({ position, fontSize, color, children }) => (
-    <mesh position={position}>
-        <sphereGeometry args={[0.01, 8, 8]} /> {/* Minimal visual presence */}
-    </mesh>
-);
-
-
-// Component to handle background click for spawning HIL nodes (if needed)
-const BackgroundSpawner = ({ onSpawn }) => {
-  const { viewport } = useThree();
-
-  return (
-    <mesh onClick={(e) => {
-      // Convert canvas click to world coordinates
-      const vector = new THREE.Vector3(e.point.x, e.point.y, e.point.z);
-      // Spawn slightly off the plane to avoid immediate overlap
-      onSpawn([vector.x, vector.y, vector.z + 0.5]); 
-    }}>
-      <planeGeometry args={[viewport.width * 2, viewport.height * 2]} />
-      <meshBasicMaterial visible={false} />
-    </mesh>
-  );
-};
-
-// Manifold Constraint Layer (The bounding box/grid)
+// Manifold (Grid) for spatial context
 const ManifoldConstraintLayer = () => {
   return (
     <group>
-      {/* Grid Helper for context */}
-      <gridHelper args={[20, 20, '#555555', '#333333']} position={[0, -0.01, 0]} />
-      {/* Axis Helper */}
+      <gridHelper args={[20, 20, '#11FF11', '#004400']} position={[0, -0.01, 0]} />
       <axesHelper args={[5]} />
     </group>
   );
 };
 
-// --- HIL Panel UI Component ---
-const HILPanel = ({ nodes, selectedNodeIds, onClearSelection, onSpawnNode, sendRAGQuery, ragState, setRagUrl, ragUrl, setPrompt, prompt }) => {
+
+// --- HIL Panel (Minimalist, Monospace Styling) ---
+const HILPanel = ({ nodes, selectedNodeIds, onSpawnNode, sendRAGQuery, ragState, setRagUrl, ragUrl, setPrompt, prompt }) => {
   const numSelected = selectedNodeIds.size;
-  const isSelected = numSelected > 0;
   
   const handleIngestionClick = () => {
     if (prompt.trim()) {
@@ -146,99 +95,103 @@ const HILPanel = ({ nodes, selectedNodeIds, onClearSelection, onSpawnNode, sendR
     }
   };
 
+  const statusColor = ragState.error ? '#FF0000' : (ragState.loading ? '#FFFF00' : '#11FF11');
+  const statusText = ragState.message || 'IDLE';
+
   return (
-    <div className="absolute top-4 right-4 bg-gray-900/90 backdrop-blur-sm p-4 rounded-lg shadow-2xl text-white w-full max-w-sm border border-cyan-500/50">
-      <h2 className="text-xl font-bold text-cyan-400 mb-4 border-b border-cyan-500/30 pb-2">
-        HIL Panel ({nodes.length} Glyphs)
+    <div style={{
+      position: 'absolute',
+      top: '10px',
+      right: '10px',
+      padding: '15px',
+      backgroundColor: 'rgba(0, 0, 0, 0.7)',
+      border: '1px solid #11FF11',
+      color: '#11FF11',
+      fontFamily: 'monospace',
+      fontSize: '12px',
+      maxWidth: '300px',
+      zIndex: 100,
+      boxShadow: '0 0 10px #11FF11'
+    }}>
+      <h2 style={{ fontSize: '16px', marginBottom: '10px', borderBottom: '1px solid #004400', paddingBottom: '5px' }}>
+        // HIL COMMAND INTERFACE
       </h2>
 
-      {/* RAG Ingestion/Query Command Input */}
-      <div className="mb-6">
-        <h3 className="text-lg font-semibold text-lime-400 mb-2">RAG/vLLM Interface</h3>
-        
-        {/* RAG URL Input */}
-        <div className="mb-3">
-          <label className="block text-xs font-medium text-gray-400 mb-1">RAG Backend URL (Cloud Run)</label>
-          <input
-            type="text"
-            className="w-full p-2 bg-gray-800 border border-gray-700 rounded-md text-sm focus:ring-lime-500 focus:border-lime-500 transition"
-            value={ragUrl}
-            onChange={(e) => setRagUrl(e.target.value)}
-            placeholder="e.g., https://vllm-backend-123.a.run.app/api/query"
-          />
-        </div>
-
-        {/* Command/Prompt Input */}
-        <div className="mb-3">
-          <label className="block text-xs font-medium text-gray-400 mb-1">Prompt / Ingestion Command</label>
-          <textarea
-            className="w-full p-2 bg-gray-800 border border-gray-700 rounded-md text-sm focus:ring-cyan-500 focus:border-cyan-500 transition resize-none"
-            rows="3"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g., Ingest the latest grant proposal documents for Glyphlight Studios."
-          ></textarea>
-        </div>
-        
-        {/* Trigger Button */}
-        <button
-          onClick={handleIngestionClick}
-          disabled={ragState.loading || !ragUrl || !prompt.trim()}
-          className="w-full py-2 px-4 rounded-md font-semibold transition-all duration-200 
-                     text-gray-900 bg-lime-400 hover:bg-lime-300 disabled:bg-gray-600 disabled:cursor-not-allowed
-                     shadow-lg hover:shadow-lime-500/50"
-        >
-          {ragState.loading ? 'Executing Command...' : 'Execute RAG Command (Trigger Ingestion/Query)'}
-        </button>
-        
-        {/* Status Message */}
-        {ragState.message && (
-          <p className={`mt-2 p-2 text-xs rounded ${ragState.error ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'}`}>
-            Status: {ragState.message}
-          </p>
-        )}
+      {/* RAG URL Input */}
+      <div style={{ marginBottom: '10px' }}>
+        <label style={{ display: 'block', color: '#88FF88', marginBottom: '4px' }}>RAG Backend URL:</label>
+        <input
+          type="text"
+          style={{ width: '100%', padding: '5px', backgroundColor: '#0A0A0A', border: '1px solid #11FF11', color: '#11FF11' }}
+          value={ragUrl}
+          onChange={(e) => setRagUrl(e.target.value)}
+          placeholder="https://vllm-endpoint/query"
+        />
       </div>
 
-
-      {/* Selected Node Details */}
-      <h3 className="text-lg font-semibold text-cyan-400 mb-2 mt-6 border-t border-cyan-500/30 pt-4">
-        Glyph Selection
-      </h3>
+      {/* Command/Prompt Input */}
+      <div style={{ marginBottom: '10px' }}>
+        <label style={{ display: 'block', color: '#88FF88', marginBottom: '4px' }}>INGEST / QUERY:</label>
+        <textarea
+          style={{ width: '100%', padding: '5px', backgroundColor: '#0A0A0A', border: '1px solid #11FF11', color: '#11FF11', resize: 'none' }}
+          rows="3"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Ingest GCS path: gs://my-bucket/docs/..."
+        ></textarea>
+      </div>
       
-      <p className="text-sm text-gray-300 mb-3">
-        {numSelected} Node{numSelected !== 1 ? 's' : ''} Selected
-      </p>
-
-      {isSelected && (
-        <button
-          onClick={onClearSelection}
-          className="w-full py-2 px-4 mb-3 rounded-md font-semibold text-gray-900 bg-red-400 hover:bg-red-500 transition-all duration-200"
-        >
-          Clear Selection
-        </button>
-      )}
-
-      {/* Manual Spawn for HIL Testing */}
+      {/* Execute Button */}
       <button
-        onClick={onSpawnNode}
-        className="w-full py-2 px-4 rounded-md font-semibold text-gray-900 bg-blue-400 hover:bg-blue-500 transition-all duration-200"
+        onClick={handleIngestionClick}
+        disabled={ragState.loading || !ragUrl || !prompt.trim()}
+        style={{
+          width: '100%',
+          padding: '8px',
+          backgroundColor: ragState.loading ? '#333' : '#11FF11',
+          color: '#000000',
+          border: 'none',
+          cursor: ragState.loading ? 'wait' : 'pointer',
+          fontWeight: 'bold',
+          marginBottom: '10px',
+          transition: 'background-color 0.2s',
+        }}
       >
-        + Spawn HIL Node
+        {ragState.loading ? 'PROCESSING...' : 'EXECUTE COMMAND'}
       </button>
 
-      {/* Debug Info */}
-      <div className="mt-4 pt-4 border-t border-gray-700">
-        <p className="text-xs text-gray-500">App ID: {appId}</p>
-        {ragState.userId && <p className="text-xs text-gray-500 break-all">User ID: {ragState.userId}</p>}
-      </div>
+      {/* HIL Node Spawner */}
+      <button
+        onClick={() => onSpawnNode([Math.random() * 8 - 4, Math.random() * 3 + 1, Math.random() * 8 - 4])}
+        style={{
+          width: '100%',
+          padding: '8px',
+          backgroundColor: '#008080',
+          color: '#11FF11',
+          border: '1px solid #11FF11',
+          cursor: 'pointer',
+          marginBottom: '10px',
+          transition: 'background-color 0.2s',
+        }}
+      >
+        + SPAWN HIL NODE
+      </button>
 
+      {/* Status Message */}
+      <div style={{ padding: '5px', border: `1px dashed ${statusColor}`, color: statusColor, wordWrap: 'break-word' }}>
+        STATUS: {statusText}
+      </div>
+      <p style={{ marginTop: '5px', color: '#55AA55' }}>
+        Glyphs Loaded: {nodes.length} | Selected: {numSelected}
+      </p>
+      {ragState.userId && <p style={{ color: '#004400', marginTop: '5px', wordBreak: 'break-all' }}>USER: {ragState.userId}</p>}
     </div>
   );
 };
 
 
 // --- Main Application Component ---
-const App = () => {
+export default function App() {
   const [dbInstance, setDbInstance] = useState(null);
   const [authState, setAuthState] = useState({ user: null, isReady: false });
   const [nodes, setNodes] = useState([]);
@@ -247,7 +200,7 @@ const App = () => {
   const [nextId, setNextId] = useState(0);
 
   // RAG State Management
-  const [ragUrl, setRagUrl] = useState('https://vllm-backend-example.a.run.app/api/query');
+  const [ragUrl, setRagUrl] = useState('https://capsuleos-vllm-backend.a.run.app/api/query');
   const [prompt, setPrompt] = useState('');
   const [ragState, setRagState] = useState({ 
     loading: false, 
@@ -270,8 +223,8 @@ const App = () => {
       db = getFirestore(app);
       auth = getAuth(app);
       setDbInstance(db);
+      // setLogLevel('Debug'); // Enable debug logging for Firebase
 
-      // Attempt to sign in
       const signIn = async () => {
         try {
           if (initialAuthToken) {
@@ -281,8 +234,7 @@ const App = () => {
           }
         } catch (e) {
           console.error("Firebase Auth Error:", e);
-          // Fallback to anonymous sign-in if custom token fails
-          await signInAnonymously(auth);
+          await signInAnonymously(auth); // Fallback
         }
       };
 
@@ -316,17 +268,17 @@ const App = () => {
       snapshot.forEach(doc => {
         const data = doc.data();
         const nodeId = doc.id;
-        // Basic data validation and mapping
+        
         if (data.position && data.color && data.name) {
           newNodes.push({
             id: nodeId,
             position: data.position,
             color: data.color,
             name: data.name,
-            data: data.data || null // Include RAG data payload
+            data: data.data || null 
           });
 
-          // Check for highest numeric ID to continue HIL node spawning
+          // Track max numeric ID for HIL node spawning
           if (!isNaN(parseInt(nodeId))) {
             maxId = Math.max(maxId, parseInt(nodeId));
           }
@@ -335,41 +287,37 @@ const App = () => {
 
       setNodes(newNodes);
       setNextId(maxId + 1);
-      
-      // Update lines based on new nodes (simple connections for now)
       updateLineConnections(newNodes);
 
     }, (error) => {
       console.error("Firestore snapshot error:", error);
-      // Optional: Display error to user
     });
 
     return () => unsubscribe();
   }, [dbInstance, authState.isReady]);
 
 
-  // Simple logic to draw lines between all nodes (can be updated for specific connections later)
+  // Simple logic to draw lines between all nodes
   const updateLineConnections = (currentNodes) => {
     if (currentNodes.length < 2) {
       setLinePoints([]);
       return;
     }
     
-    // For every node, connect it to its two immediate neighbors in the array (creating a simple loop/chain)
+    // Connect every node to its immediate neighbor in the array (creating a simple chain/loop)
     const connections = [];
     for (let i = 0; i < currentNodes.length; i++) {
         const nodeA = currentNodes[i];
-        const nodeB = currentNodes[(i + 1) % currentNodes.length]; // Wrap around for a loop
+        const nodeB = currentNodes[(i + 1) % currentNodes.length]; 
         
         connections.push({
             points: [
                 new THREE.Vector3(...nodeA.position), 
                 new THREE.Vector3(...nodeB.position)
             ],
-            color: '#808080' // Gray connecting lines
+            color: '#004400' // Dark green lines for subtle aesthetic
         });
     }
-
     setLinePoints(connections);
   };
 
@@ -379,23 +327,16 @@ const App = () => {
   const handleNodeSelect = useCallback((id) => {
     setSelectedNodeIds(prev => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   }, []);
 
-  const handleClearSelection = useCallback(() => {
-    setSelectedNodeIds(new Set());
-  }, []);
-  
   // HIL Node Spawner
-  const handleSpawnNode = useCallback(async (position = [Math.random() * 10 - 5, Math.random() * 5, Math.random() * 10 - 5]) => {
+  const handleSpawnNode = useCallback(async (position) => {
     if (!dbInstance || !authState.user) {
-      alert("System not ready or not authenticated. Please wait.");
+      console.error("System not ready or not authenticated.");
+      setRagState(prev => ({ ...prev, message: 'Auth required to spawn HIL Node.', error: true }));
       return;
     }
 
@@ -408,30 +349,27 @@ const App = () => {
     };
 
     try {
-      // Use the 'nextId' as the document ID for simple, sequential HIL nodes
+      // Write the new node to Firestore
       const docRef = doc(dbInstance, `/artifacts/${appId}/public/data/glyphs`, nextId.toString());
       await setDoc(docRef, newNode);
       console.log("HIL Node spawned and saved with ID:", nextId);
     } catch (e) {
       console.error("Error adding document: ", e);
+      setRagState(prev => ({ ...prev, message: `DB Error: ${e.message}`, error: true }));
     }
   }, [dbInstance, authState.user, nextId]);
 
 
   // --- RAG/Ingestion Logic ---
 
-  // Exponential backoff utility for robust API calls
   const exponentialBackoffFetch = async (url, options, retries = 3, delay = 1000) => {
     for (let i = 0; i < retries; i++) {
         try {
             const response = await fetch(url, options);
-            if (!response.ok) {
-                // If it's a 4xx or 5xx error, throw it to trigger retry
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             return response;
         } catch (error) {
-            if (i === retries - 1) throw error; // Re-throw the error on the last attempt
+            if (i === retries - 1) throw error;
             await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
         }
     }
@@ -440,36 +378,27 @@ const App = () => {
   const sendRAGQuery = async (queryPrompt) => {
     if (!ragUrl || ragState.loading) return;
 
-    setRagState({ loading: true, message: 'Sending command to RAG backend...', error: false, userId: ragState.userId });
+    setRagState({ loading: true, message: 'SENDING COMMAND...', error: false, userId: ragState.userId });
     
     try {
-        // Construct the payload for the RAG service
         const payload = {
             prompt: queryPrompt,
-            // Include user context if needed by the backend
             user_id: authState.user?.uid || 'anonymous', 
             app_id: appId,
-            // You can add data source info here for GCS ingestion:
-            // command: queryPrompt.includes("Ingest") ? "ingest" : "query"
         };
         
-        // This simulates a call to your Cloud Run vLLM/RAG backend
         const response = await exponentialBackoffFetch(ragUrl, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                // Add any necessary authorization headers here if your backend requires them
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         });
 
         const result = await response.json();
 
-        // Assuming the RAG service successfully processes the request.
-        // If ingestion or node creation is successful, the Firestore listener will auto-update the graph.
+        // The backend should return a confirmation message. New nodes will appear via Firestore listener.
         setRagState({ 
           loading: false, 
-          message: `Command success! Response: ${result.message || 'Processing initiated.'}. Expect graph updates shortly.`, 
+          message: `COMMAND ACKNOWLEDGED: ${result.message || 'Processing initiated.'}.`, 
           error: false, 
           userId: ragState.userId 
         });
@@ -478,7 +407,7 @@ const App = () => {
         console.error("RAG Query Error:", e);
         setRagState({ 
           loading: false, 
-          message: `RAG API Error: ${e.message}. Check URL and backend status.`, 
+          message: `RAG API ERROR: ${e.message}. CHECK URL.`, 
           error: true, 
           userId: ragState.userId 
         });
@@ -487,24 +416,34 @@ const App = () => {
 
 
   return (
-    <div className="w-full h-screen bg-gray-900 font-sans relative">
-      <Canvas 
-        className="w-full h-full"
-        camera={{ position: [0, 5, 15], fov: 60 }}
-        shadows
-      >
-        {/* Holographic Lighting */}
-        <ambientLight intensity={0.5} color="cyan" />
-        <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
-        <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
-        
-        {/* Orbit Controls to allow rotation and zooming */}
-        <OrbitControls enableDamping dampingFactor={0.05} />
+    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000000', position: 'relative' }}>
+      
+      {/* Top Left Title/Debug */}
+      <div style={{
+        position: 'absolute',
+        top: 10, left: 10,
+        color: 'lime',
+        fontFamily: 'monospace',
+        pointerEvents: 'none',
+        zIndex: 100
+      }}>
+        CAPSULEOS GRAPHS | LIVE NODE COUNT: {nodes.length}
+      </div>
 
-        {/* --- Manifold Constraint Layer (Boundary) --- */}
+      <Canvas 
+        style={{ width: '100%', height: '100%' }}
+        camera={{ position: [0, 5, 15], fov: 60 }}
+      >
+        <OrbitControls enableDamping dampingFactor={0.05} />
+        
+        {/* Holographic Lighting - Green/Cyan/Orange glow */}
+        <ambientLight intensity={0.5} color="#11FF11" />
+        <pointLight position={[10, 10, 10]} intensity={1} color="#11FF11" />
+        <pointLight position={[-10, -10, -10]} intensity={0.5} color="#FF8800" />
+        
         <ManifoldConstraintLayer />
         
-        {/* Render all GΛLYPH Nodes (Axiomatic and RAG-Derived) */}
+        {/* Render all GΛLYPH Nodes from Firestore */}
         {nodes.map(node => (
           <GlyphNode
             key={node.id}
@@ -518,18 +457,15 @@ const App = () => {
         ))}
         
         {/* Render Lattice Constraints (Wires) */}
-        {linePoints.map((connection, index) => (
+        {linePoints.map(({ points, color }, index) => (
           <Line
             key={index}
-            points={connection.points}
-            color={connection.color}
-            lineWidth={2}
+            points={points}
+            color={color}
+            lineWidth={1}
             dashed={false}
           />
         ))}
-        
-        {/* Background Click Spawner (Optional: If clicking background spawns HIL nodes) */}
-        {/* <BackgroundSpawner onSpawn={handleSpawnNode} /> */}
         
       </Canvas>
       
@@ -537,8 +473,7 @@ const App = () => {
       <HILPanel
         nodes={nodes}
         selectedNodeIds={selectedNodeIds}
-        onClearSelection={handleClearSelection}
-        onSpawnNode={() => handleSpawnNode([0, 2, 0])} // Spawn at a visible center point
+        onSpawnNode={handleSpawnNode}
         sendRAGQuery={sendRAGQuery}
         ragState={ragState}
         setRagUrl={setRagUrl}
@@ -549,7 +484,5 @@ const App = () => {
 
     </div>
   );
-};
-
-export default App;
+}
 
