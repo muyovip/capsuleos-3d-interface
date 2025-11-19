@@ -1,5 +1,6 @@
 import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, Line } from '@react-three/drei' 
+// IMPORTANT: Added <Text> import for reliable text rendering
+import { OrbitControls, Line, Text } from '@react-three/drei' 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
@@ -37,24 +38,7 @@ const RAG_ARTIFACTS = [
     { name: "Nico Robin Agent", color: "yellow", type: "HIL-Agent", pos: [-1, 4, 3], links: ['hax', 'manifold'] }
 ];
 
-// Helper function to create a texture with text on it (Absolute Fidelity)
-function createTextTexture(text, color, fontSize = 64) { 
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  
-  canvas.width = 2048; 
-  canvas.height = 128; 
-
-  context.font = `Bold ${fontSize}px monospace`;
-  context.fillStyle = color;
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.fillText(text, canvas.width / 2, canvas.height / 2);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return texture;
-}
+// Removed the problematic createTextTexture helper function
 
 // Manifold Constraint Layer (The topological boundary)
 function ManifoldConstraintLayer() {
@@ -84,7 +68,6 @@ function ManifoldConstraintLayer() {
 // 1. The GΛLYPH NODE Component
 function GlyphNode({ position, color, name, onClick }) {
   const meshRef = useRef()
-  const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
     if (meshRef.current) {
@@ -94,6 +77,7 @@ function GlyphNode({ position, color, name, onClick }) {
     }
   })
 
+  // We place the onClick on the whole group for easier mobile tapping
   return (
     <group position={position} onClick={onClick}>
       {/* Icosahedron Mesh - The Glyptic Core */}
@@ -102,11 +86,20 @@ function GlyphNode({ position, color, name, onClick }) {
         <meshBasicMaterial color={color} wireframe />
       </mesh>
       
-      {/* Text Mesh using Canvas Texture - The Identity Layer */}
-      <mesh position={[0, 0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[5.0, 0.8]} /> 
-        <meshBasicMaterial map={texture} transparent />
-      </mesh>
+      {/* Text Component using Drei's <Text> for reliable, billboarded rendering */}
+      <Text 
+        position={[0, 1.0, 0]} // Positioning the text above the core
+        fontSize={0.4}
+        color={color}
+        // Using a built-in monospace font for a clear, code-like appearance
+        font="https://fonts.gstatic.com/s/monofett/v20/6cTfajD9fU82RDPvDTS_e0c.woff" 
+        anchorX="center"
+        anchorY="middle"
+        // Key fix: Text always faces the camera for perfect readability (like the 3D-planet)
+        billboard={true} 
+      >
+        {name}
+      </Text>
     </group>
   )
 }
@@ -231,11 +224,10 @@ export default function App() {
         console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
       } else {
         // Document doesn't exist, initialize it:
-        // 1. Set local state immediately for visual feedback (THE FIX)
         setNodes(INITIAL_SYSTEM_STATE.nodes);
         setConstraints(INITIAL_SYSTEM_STATE.constraints);
         
-        // 2. Initialize the document in Firestore
+        // Initialize the document in Firestore
         initializeState(); 
         
         console.log("Document missing. Initializing local state and writing to Firestore.");
@@ -464,6 +456,7 @@ export default function App() {
             position={node.position} 
             color={node.color} 
             name={node.name}
+            // Log interaction but don't allow a true "terminal" input for now to avoid the keyboard issue
             onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
           />
         ))}
@@ -474,8 +467,12 @@ export default function App() {
             key={index}
             points={points}
             color={color} 
-            lineWidth={2}
+            lineWidth={4} // Increased line width for better visibility
             dashed={false}
+            // Added properties to help lines render over geometry and be more visible
+            transparent={true} 
+            opacity={1.0}
+            depthTest={false} 
           />
         ))}
         
@@ -486,3 +483,4 @@ export default function App() {
     </div>
   )
 }
+
