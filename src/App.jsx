@@ -8,9 +8,10 @@ const PARTICLE_COUNT_INNER = 15000;
 const PARTICLE_COUNT_OUTER = 35000;
 const MAX_GALAXY_RADIUS = 45; // Galaxy width is 90 units
 const CAMERA_FOV = 60;
-const REFERENCE_Z = 25; // Base distance for target visual size (Landscape distance)
+const LANDSCAPE_Z = 25; // Base distance for landscape
+const PORTRAIT_Z = 160; // Estimated distance for portrait
 
-// --- AXIOMATIC DATA ---
+// --- AXIOMATIC DATA (Remains the same) ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
     { id: 'rag-orch', name: 'Multi-Agent RAG', color: '#00ffff', position: [3.5, 1.0, 0] },
@@ -28,18 +29,14 @@ const INITIAL_SYSTEM_STATE = {
   ],
 };
 
-// --- RESPONSIVE CAMERA CONTROLLER & STATE PUSHER ---
+// --- CAMERA CONTROLLER & SIZE STATE ---
 
-// 1. Component to read the camera Z position and push it to parent state
-function CameraState({ setCameraZ }) {
+// This component now *only* sets the camera Z and pushes the aspect ratio
+function ResponsiveCamera({ setAspect }) {
   const { camera, size } = useThree();
   const tanHalfFOV = useMemo(() => Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2)), []);
   const controlsRef = useRef();
 
-  // Use a ref to store the previous Z to prevent redundant updates
-  const lastZ = useRef(0);
-
-  // Calculate new camera position on resize
   useEffect(() => {
     const aspect = size.width / size.height;
     const objectWidth = MAX_GALAXY_RADIUS * 2; 
@@ -50,34 +47,21 @@ function CameraState({ setCameraZ }) {
     finalZ = Math.min(Math.max(finalZ, 20), 200); 
 
     if (aspect > 1.2) {
-      finalZ = REFERENCE_Z; // Landscape: Z=25
+      finalZ = LANDSCAPE_Z; // Landscape: Z=25
     }
 
     camera.position.set(0, 2, finalZ); 
     camera.updateProjectionMatrix();
     
-    // Update controls and push state to parent
     if (controlsRef.current) {
       controlsRef.current.target.set(0, 0, 0);
       controlsRef.current.update();
     }
     
-    // Only update parent state if the Z value has changed significantly
-    if (Math.abs(lastZ.current - finalZ) > 1) {
-        setCameraZ(finalZ);
-        lastZ.current = finalZ;
-    }
+    // Pass the aspect ratio up to the parent App component
+    setAspect(aspect);
 
-  }, [size, camera, tanHalfFOV, setCameraZ]);
-
-  // Read camera Z position on every frame if the user is dragging (for smooth line/node scaling)
-  useFrame(() => {
-    const currentZ = camera.position.z;
-    if (Math.abs(lastZ.current - currentZ) > 1) {
-        setCameraZ(currentZ);
-        lastZ.current = currentZ;
-    }
-  });
+  }, [size, camera, tanHalfFOV, setAspect]);
 
   return (
     <OrbitControls 
@@ -93,6 +77,7 @@ function CameraState({ setCameraZ }) {
 
 // --- PARTICLE SHADER (remains the same) ---
 const ParticleShaderMaterial = {
+  // ... (Shader code is omitted for brevity, but it is unchanged) ...
   vertexShader: `
     uniform float time;
     attribute float sizes;
@@ -129,101 +114,98 @@ const ParticleShaderMaterial = {
 
 // --- FUSION PARTICLE PLANET (remains the same) ---
 function ParticlePlanet() {
-  const mesh = useRef();
+    // ... (ParticlePlanet component code is omitted for brevity, but it is unchanged) ...
+    const mesh = useRef();
   
-  const { positions, sizes, shifts } = useMemo(() => {
-    const particles = PARTICLE_COUNT_INNER + PARTICLE_COUNT_OUTER;
-    const positions = new Float32Array(particles * 3);
-    const sizes = new Float32Array(particles);
-    const shifts = new Float32Array(particles * 4);
-
-    let ptr = 0;
-
-    // Inner Core
-    for (let i = 0; i < PARTICLE_COUNT_INNER; i++) {
-      const r = Math.random() * 3.0 + 8.0; 
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      
-      positions[ptr * 3] = r * Math.sin(phi) * Math.cos(theta);
-      positions[ptr * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-      positions[ptr * 3 + 2] = r * Math.cos(phi);
-      
-      sizes[ptr] = Math.random() * 2.0 + 1.0; 
-      shifts[ptr * 4] = Math.random() * Math.PI;
-      shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
-      shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
-      shifts[ptr * 4 + 3] = Math.random() * 0.9 + 0.1;
-      ptr++;
-    }
-
-    // Outer Shell
-    for (let i = 0; i < PARTICLE_COUNT_OUTER; i++) {
-      const r = 12; 
-      const R = MAX_GALAXY_RADIUS;
-      const rand = Math.pow(Math.random(), 1.5);
-      const radius = Math.sqrt(R * R * rand + (1 - rand) * r * r);
-      const theta = Math.random() * 2 * Math.PI;
-      const y = (Math.random() - 0.5) * 12.0; 
-
-      const v = new THREE.Vector3().setFromCylindricalCoords(radius, theta, y);
-      
-      positions[ptr * 3] = v.x;
-      positions[ptr * 3 + 1] = v.y;
-      positions[ptr * 3 + 2] = v.z;
-      
-      sizes[ptr] = Math.random() * 2.5 + 1.0; 
-      shifts[ptr * 4] = Math.random() * Math.PI;
-      shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
-      shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
-      shifts[ptr * 4 + 3] = Math.random() * 0.9 + 0.1;
-      ptr++;
-    }
-
-    return { positions, sizes, shifts };
-  }, []);
-
-  useFrame((state) => {
-    if (mesh.current) {
-      mesh.current.material.uniforms.time.value = state.clock.elapsedTime;
-      mesh.current.rotation.y = state.clock.elapsedTime * 0.05;
-      mesh.current.rotation.z = 0.1; 
-      mesh.current.rotation.x = -0.2; 
-    }
-  });
-
-  return (
-    <points ref={mesh}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
-        <bufferAttribute attach="attributes-sizes" count={sizes.length} array={sizes} itemSize={1} />
-        <bufferAttribute attach="attributes-shift" count={shifts.length / 4} array={shifts} itemSize={4} />
-      </bufferGeometry>
-      <shaderMaterial
-        uniforms={{ time: { value: 0 } }}
-        vertexShader={ParticleShaderMaterial.vertexShader}
-        fragmentShader={ParticleShaderMaterial.fragmentShader}
-        transparent={true}
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
-      />
-    </points>
-  );
+    const { positions, sizes, shifts } = useMemo(() => {
+        const particles = PARTICLE_COUNT_INNER + PARTICLE_COUNT_OUTER;
+        const positions = new Float32Array(particles * 3);
+        const sizes = new Float32Array(particles);
+        const shifts = new Float32Array(particles * 4);
+    
+        let ptr = 0;
+    
+        // Inner Core
+        for (let i = 0; i < PARTICLE_COUNT_INNER; i++) {
+          const r = Math.random() * 3.0 + 8.0; 
+          const theta = Math.random() * Math.PI * 2;
+          const phi = Math.acos(2 * Math.random() - 1);
+          
+          positions[ptr * 3] = r * Math.sin(phi) * Math.cos(theta);
+          positions[ptr * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+          positions[ptr * 3 + 2] = r * Math.cos(phi);
+          
+          sizes[ptr] = Math.random() * 2.0 + 1.0; 
+          shifts[ptr * 4] = Math.random() * Math.PI;
+          shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
+          shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
+          shifts[ptr * 4 + 3] = Math.random() * 0.9 + 0.1;
+          ptr++;
+        }
+    
+        // Outer Shell
+        for (let i = 0; i < PARTICLE_COUNT_OUTER; i++) {
+          const r = 12; 
+          const R = MAX_GALAXY_RADIUS;
+          const rand = Math.pow(Math.random(), 1.5);
+          const radius = Math.sqrt(R * R * rand + (1 - rand) * r * r);
+          const theta = Math.random() * 2 * Math.PI;
+          const y = (Math.random() - 0.5) * 12.0; 
+    
+          const v = new THREE.Vector3().setFromCylindricalCoords(radius, theta, y);
+          
+          positions[ptr * 3] = v.x;
+          positions[ptr * 3 + 1] = v.y;
+          positions[ptr * 3 + 2] = v.z;
+          
+          sizes[ptr] = Math.random() * 2.5 + 1.0; 
+          shifts[ptr * 4] = Math.random() * Math.PI;
+          shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
+          shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
+          shifts[ptr * 4 + 3] = Math.random() * 0.9 + 0.1;
+          ptr++;
+        }
+    
+        return { positions, sizes, shifts };
+      }, []);
+    
+      useFrame((state) => {
+        if (mesh.current) {
+          mesh.current.material.uniforms.time.value = state.clock.elapsedTime;
+          mesh.current.rotation.y = state.clock.elapsedTime * 0.05;
+          mesh.current.rotation.z = 0.1; 
+          mesh.current.rotation.x = -0.2; 
+        }
+      });
+    
+      return (
+        <points ref={mesh}>
+          <bufferGeometry>
+            <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
+            <bufferAttribute attach="attributes-sizes" count={sizes.length} array={sizes} itemSize={1} />
+            <bufferAttribute attach="attributes-shift" count={shifts.length / 4} array={shifts} itemSize={4} />
+          </bufferGeometry>
+          <shaderMaterial
+            uniforms={{ time: { value: 0 } }}
+            vertexShader={ParticleShaderMaterial.vertexShader}
+            fragmentShader={ParticleShaderMaterial.fragmentShader}
+            transparent={true}
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+          />
+        </points>
+      );
 }
 
-// --- AXIOMATIC NODE (Dynamically scaled) ---
-function GlyphNode({ id, position, color, name, onSelect, cameraZ }) {
+// --- AXIOMATIC NODE (Fixed scale based on orientation) ---
+function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
   const meshRef = useRef();
 
-  // --- Dynamic Scaling Logic (Using reliable cameraZ prop) ---
-  const currentZ = Math.max(cameraZ, 1); 
-  const distanceRatio = currentZ / REFERENCE_Z; 
-  
-  // Use a slight "boost" in the numerator for far-away nodes (portrait mode)
-  const nodeScale = (3.0 * 1.2) / distanceRatio; 
-  const labelScale = (1.5 * 1.2) / distanceRatio;
+  // FIX: Node scale is now fixed based only on the orientationScale prop
+  const nodeScale = 3.0 * orientationScale;
+  const labelScale = 1.5 * orientationScale;
 
-  // --- Animation and Click ---
+  // --- Animation and Click (remains the same) ---
   useFrame((state, delta) => {
     if (meshRef.current) {
       meshRef.current.rotation.x += delta * 0.2
@@ -232,29 +214,26 @@ function GlyphNode({ id, position, color, name, onSelect, cameraZ }) {
   })
 
   const handleClick = useCallback((e) => {
-    // This is the key fix for clickability on mobile
     e.stopPropagation(); 
     onSelect(id);
   }, [id, onSelect]);
 
   return (
-    // Clickable group
     <group position={position} onClick={handleClick}>
       
       {/* 1. Wireframe Icosahedron */}
       <mesh ref={meshRef}>
         <icosahedronGeometry args={[nodeScale, 0]} /> 
-        <meshBasicMaterial color={color} wireframe thickness={0.15} />
+        <meshBasicMaterial color={color} wireframe thickness={0.15 * orientationScale} />
       </mesh>
       
-      {/* 2. Transparent Sphere (The actual easy-to-click target) */}
+      {/* 2. Transparent Sphere (Click target) */}
       <mesh>
         <sphereGeometry args={[nodeScale * 1.1, 16, 16]} />
-        {/* The object opacity is 0.0, making it invisible but fully clickable */}
         <meshBasicMaterial color={color} transparent opacity={0.0} /> 
       </mesh>
       
-      {/* 3. Text Label (Fixed position relative to node scale) */}
+      {/* 3. Text Label */}
       <group position={[0, nodeScale + 0.3, 0]}>
          <Text
             fontSize={labelScale}
@@ -274,14 +253,14 @@ function GlyphNode({ id, position, color, name, onSelect, cameraZ }) {
 
 // --- MAIN APP ---
 export default function App() {
-  const [nodes] = useState(INITIAL_SYSTEM_STATE.nodes)
-  const [constraints] = useState(INITIAL_SYSTEM_STATE.constraints)
-  // New state to hold the dynamically updated camera Z position
-  const [cameraZ, setCameraZ] = useState(REFERENCE_Z); 
+  const [nodes] = useState(INITIAL_SYSTEM_STATE.nodes);
+  const [constraints] = useState(INITIAL_SYSTEM_STATE.constraints);
+  
+  // State to hold the aspect ratio (width/height) from the canvas
+  const [aspect, setAspect] = useState(1); 
 
   const handleNodeSelect = (id) => {
     console.log("Node Selected:", id);
-    // You can now add UI feedback here, as clicking is fixed.
   }
 
   const linePoints = useMemo(() => {
@@ -299,14 +278,21 @@ export default function App() {
     return points;
   }, [nodes, constraints]);
 
-  // Calculate dynamic line width based on reliable cameraZ state
-  const lineDistanceRatio = Math.max(cameraZ, 1) / REFERENCE_Z; 
-  // Base line width of 4.0 at Z=25. Divide by the ratio. Use the 1.2 boost for consistency.
-  const dynamicLineWidth = (4.0 * 1.2) / lineDistanceRatio;
+  // FIX: Calculate the scale factor based on orientation (aspect ratio) only.
+  // We use the ratio of Portrait Z / Landscape Z (~6.4) to scale the nodes down in portrait mode.
+  const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // ~6.4
+  
+  // If aspect ratio is less than 1.2 (Portrait mode), scale nodes DOWN.
+  // Otherwise (Landscape mode), use a scale of 1 (no scaling).
+  const orientationScale = aspect < 1.2 ? 1 / Z_RATIO : 1; 
+  
+  // Base line width (at Landscape Z)
+  const baseLineWidth = 4.0; 
+  // Apply the same orientation scale to the lines.
+  const dynamicLineWidth = baseLineWidth * orientationScale;
 
 
   return (
-    // CSS is final and locks the screen height
     <div 
       style={{ 
         position: 'fixed', 
@@ -319,7 +305,7 @@ export default function App() {
       }} 
       className="bg-black overflow-hidden touch-none"
     >
-      {/* HUD (remains the same) */}
+      {/* HUD */}
       <div style={{
         position: 'absolute', top: 20, left: 20, zIndex: 10,
         color: 'cyan', fontFamily: 'monospace', pointerEvents: 'none',
@@ -331,8 +317,8 @@ export default function App() {
       </div>
 
       <Canvas dpr={[1, 2]} camera={{ fov: CAMERA_FOV }}>
-        {/* Pass the state setter down */}
-        <CameraState setCameraZ={setCameraZ} />
+        {/* Pass the aspect ratio setter down */}
+        <ResponsiveCamera setAspect={setAspect} />
         
         <ParticlePlanet />
 
@@ -341,7 +327,7 @@ export default function App() {
             key={node.id}
             {...node}
             onSelect={handleNodeSelect}
-            cameraZ={cameraZ} // Pass the reliable Z position down
+            orientationScale={orientationScale} // Pass orientation scale factor
           />
         ))}
 
@@ -351,7 +337,7 @@ export default function App() {
             key={i} 
             points={[l.start, l.end]} 
             color={l.color} 
-            lineWidth={dynamicLineWidth} // Use reliable dynamic width
+            lineWidth={dynamicLineWidth} // Use orientation scale
             transparent 
             opacity={0.5} 
           />
