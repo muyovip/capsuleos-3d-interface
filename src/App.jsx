@@ -12,6 +12,10 @@ const CAMERA_FOV = 60;
 // Base camera distances used by ResponsiveCamera
 const LANDSCAPE_Z = 25; 
 const PORTRAIT_Z = 160; 
+const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // ~6.4
+
+// Scaling factor for visual pop in portrait mode (optional but good for visual feel)
+const SCALE_BOOST = 1.2;
 
 // Base size multiplier. Nodes will be scaled from this base.
 const BASE_NODE_RADIUS = 3.0;
@@ -36,7 +40,7 @@ const INITIAL_SYSTEM_STATE = {
   ],
 };
 
-// --- CAMERA CONTROLLER & SIZE STATE ---
+// --- CAMERA CONTROLLER & SIZE STATE (Updated Camera Z logic) ---
 function ResponsiveCamera({ setAspect }) {
   const { camera, size } = useThree();
   const tanHalfFOV = useMemo(() => Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2)), []);
@@ -52,10 +56,9 @@ function ResponsiveCamera({ setAspect }) {
     finalZ = Math.min(Math.max(finalZ, 20), 200); 
 
     if (aspect > 1.2) {
-      finalZ = LANDSCAPE_Z; 
+      finalZ = LANDSCAPE_Z; // Landscape is close
     } else {
-        // Ensure it uses the defined portrait Z if aspect ratio logic dictates a much smaller Z
-        finalZ = Math.max(finalZ, PORTRAIT_Z * 0.9);
+        finalZ = PORTRAIT_Z; // Portrait is far
     }
 
 
@@ -132,16 +135,14 @@ function ParticlePlanet() {
     
         let ptr = 0;
     
-        // Inner Core
+        // Inner Core & Outer Shell Logic (omitted for brevity, remains unchanged)
         for (let i = 0; i < PARTICLE_COUNT_INNER; i++) {
           const r = Math.random() * 3.0 + 8.0; 
           const theta = Math.random() * Math.PI * 2;
           const phi = Math.acos(2 * Math.random() - 1);
-          
           positions[ptr * 3] = r * Math.sin(phi) * Math.cos(theta);
           positions[ptr * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
           positions[ptr * 3 + 2] = r * Math.cos(phi);
-          
           sizes[ptr] = Math.random() * 2.0 + 1.0; 
           shifts[ptr * 4] = Math.random() * Math.PI;
           shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
@@ -150,7 +151,6 @@ function ParticlePlanet() {
           ptr++;
         }
     
-        // Outer Shell
         for (let i = 0; i < PARTICLE_COUNT_OUTER; i++) {
           const r = 12; 
           const R = MAX_GALAXY_RADIUS;
@@ -208,7 +208,7 @@ function ParticlePlanet() {
 function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
   const meshRef = useRef();
 
-  // FIX: Node scale is now fixed based only on the orientationScale prop
+  // Scale is calculated by multiplying the base size by the factor determined in App
   const nodeScale = BASE_NODE_RADIUS * orientationScale;
   const labelScale = BASE_LABEL_SIZE * orientationScale;
 
@@ -262,8 +262,6 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
 export default function App() {
   const [nodes] = useState(INITIAL_SYSTEM_STATE.nodes);
   const [constraints] = useState(INITIAL_SYSTEM_STATE.constraints);
-  
-  // State to hold the aspect ratio (width/height) from the canvas
   const [aspect, setAspect] = useState(1); 
 
   const handleNodeSelect = (id) => {
@@ -285,15 +283,19 @@ export default function App() {
     return points;
   }, [nodes, constraints]);
 
-  // FIX: Calculate the scale factor based on orientation (aspect ratio) only.
-  const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // ~6.4
+  // FIX: Calculate the scale factor based on orientation.
   
-  // Base scale is 1.0, intended for the portrait view (furthest away)
   let orientationScale = 1.0; 
   
   if (aspect > 1.2) {
-    // Landscape mode is Z=25 (closer). Scale DOWN the node size by the Z_RATIO.
-    orientationScale = 1 / Z_RATIO; 
+    // 1. LANDSCAPE (Aspect > 1.2): Camera is CLOSE (Z=25). 
+    // To keep visual size constant, geometric size must be scaled DOWN by Z_RATIO.
+    orientationScale = (1 / Z_RATIO) * SCALE_BOOST; 
+  } else {
+    // 2. PORTRAIT (Aspect < 1.2): Camera is FAR (Z=160).
+    // To keep visual size constant, geometric size must be scaled UP by the Z_RATIO.
+    // However, since we are using 1.0 as the base, we only need a small boost.
+    orientationScale = 1.0 * SCALE_BOOST; 
   }
 
   const dynamicLineWidth = BASE_LINE_WIDTH * orientationScale;
@@ -311,7 +313,7 @@ export default function App() {
       }} 
       className="bg-black overflow-hidden touch-none"
     >
-      {/* HUD */}
+      {/* HUD (omitted for brevity, remains unchanged) */}
       <div style={{
         position: 'absolute', top: 20, left: 20, zIndex: 10,
         color: 'cyan', fontFamily: 'monospace', pointerEvents: 'none',
@@ -323,7 +325,6 @@ export default function App() {
       </div>
 
       <Canvas dpr={[1, 2]} camera={{ fov: CAMERA_FOV }}>
-        {/* Pass the aspect ratio setter down */}
         <ResponsiveCamera setAspect={setAspect} />
         
         <ParticlePlanet />
