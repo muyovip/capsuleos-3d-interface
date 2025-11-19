@@ -1,487 +1,276 @@
-import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, Line } from '@react-three/drei' 
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { OrbitControls, Line, Text } from '@react-three/drei'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import * as THREE from 'three'
 
-// --- FIREBASE IMPORTS ---
+// --- FIREBASE IMPORTS (Keep your existing config) ---
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { setLogLevel } from 'firebase/firestore';
 
-// Enable Firestore debug logging
-setLogLevel('debug');
+// --- CONFIGURATION ---
+const PARTICLE_COUNT_INNER = 20000; // Reduced slightly for mobile stability
+const PARTICLE_COUNT_OUTER = 40000;
 
 // --- AXIOMATIC DATA ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
-    { id: 'rag-orch', name: 'Multi-Agent RAG', color: 'cyan', position: [2.0, 1.0, 0] },
-    { id: 'glyph-eng', name: 'GΛLYPH Engine', color: 'lime', position: [-2.0, 1.0, 0] },
-    { id: 'vgm-anchor', name: 'VGM Anchor', color: 'cyan', position: [0, 2.5, -1.5] },
-    { id: 'manifold', name: 'Manifold Constraint', color: 'lime', position: [0, -2.5, 1.5] },
-    { id: 'hax', name: 'HIL Agent X', color: 'orange', position: [3, -0.5, -0.5] },
+    { id: 'rag-orch', name: 'Multi-Agent RAG', color: '#00ffff', position: [3.5, 1.0, 0] }, // Cyan
+    { id: 'glyph-eng', name: 'GΛLYPH Engine', color: '#32cd32', position: [-3.5, 1.0, 0] }, // Lime
+    { id: 'vgm-anchor', name: 'VGM Anchor', color: '#00ffff', position: [0, 4.0, -2.0] },
+    { id: 'manifold', name: 'Manifold Constraint', color: '#32cd32', position: [0, -4.0, 2.0] },
+    { id: 'hax', name: 'HIL Agent X', color: '#ffaa00', position: [4.5, -1.0, -1.0] }, // Orange
   ],
   constraints: [
-    ['rag-orch', 'glyph-eng', 'lime'],
-    ['rag-orch', 'vgm-anchor', 'cyan'],
-    ['glyph-eng', 'manifold', 'lime'],
-    ['vgm-anchor', 'hax', 'orange'],
-    ['manifold', 'hax', 'orange'],
+    ['rag-orch', 'glyph-eng', '#32cd32'],
+    ['rag-orch', 'vgm-anchor', '#00ffff'],
+    ['glyph-eng', 'manifold', '#32cd32'],
+    ['vgm-anchor', 'hax', '#ffaa00'],
+    ['manifold', 'hax', '#ffaa00'],
   ],
 };
 
-// --- RAG INGESTION ARTIFACTS ---
-const RAG_ARTIFACTS = [
-    { name: "Regenesis Dystopia", color: "red", type: "RAG-Synthesis", pos: [-3, -4, 2], links: ['rag-orch', 'glyph-eng'] },
-    { name: "QLM-NFT Protocol", color: "purple", type: "VGM-Output", pos: [4, 3, -1], links: ['vgm-anchor', 'hax'] },
-    { name: "Nico Robin Agent", color: "yellow", type: "HIL-Agent", pos: [-1, 4, 3], links: ['hax', 'manifold'] }
-];
+// --- PARTICLE PLANET SHADER MATERIAL (Ported from Builder.io Blog) ---
+const ParticleShaderMaterial = {
+  vertexShader: `
+    uniform float time;
+    attribute float sizes;
+    attribute vec4 shift;
+    varying vec3 vColor;
+    void main() {
+      vec3 color1 = vec3(227., 155., 0.) / 255.; // Orange Core
+      vec3 color2 = vec3(100., 50., 255.) / 255.; // Purple Outer
+      
+      vec3 newPos = position;
+      
+      float t = time;
+      float moveT = mod(shift.x + shift.z * t, 6.28318);
+      float moveS = mod(shift.y + shift.z * t, 6.28318);
+      
+      newPos += vec3(cos(moveS) * sin(moveT), cos(moveT), sin(moveS) * sin(moveT)) * shift.w;
+      
+      float d = length(abs(position) / vec3(40., 10., 40.));
+      d = clamp(d, 0., 1.);
+      
+      vColor = mix(color1, color2, d);
+      
+      vec4 mvPosition = modelViewMatrix * vec4(newPos, 1.0);
+      gl_PointSize = sizes * (10.0 / -mvPosition.z);
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vColor;
+    void main() {
+      float d = length(gl_PointCoord.xy - 0.5);
+      if (d > 0.5) discard;
+      gl_FragColor = vec4(vColor, smoothstep(0.5, 0.1, d));
+    }
+  `
+};
 
-// Helper function to create a texture with text on it (Absolute Fidelity)
-function createTextTexture(text, color, fontSize = 64) { 
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
+// --- COMPONENT: FUSION PARTICLE PLANET ---
+function ParticlePlanet() {
+  const mesh = useRef();
   
-  canvas.width = 2048; 
-  canvas.height = 128; 
+  const { positions, sizes, shifts } = useMemo(() => {
+    const particles = PARTICLE_COUNT_INNER + PARTICLE_COUNT_OUTER;
+    const positions = new Float32Array(particles * 3);
+    const sizes = new Float32Array(particles);
+    const shifts = new Float32Array(particles * 4);
 
-  context.font = `Bold ${fontSize}px monospace`;
-  context.fillStyle = color;
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.fillText(text, canvas.width / 2, canvas.height / 2);
+    let ptr = 0;
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return texture;
-}
+    // Inner Core
+    for (let i = 0; i < PARTICLE_COUNT_INNER; i++) {
+      const r = Math.random() * 0.5 + 9.5;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      
+      positions[ptr * 3] = r * Math.sin(phi) * Math.cos(theta);
+      positions[ptr * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+      positions[ptr * 3 + 2] = r * Math.cos(phi);
+      
+      sizes[ptr] = Math.random() * 1.5 + 0.5;
+      shifts[ptr * 4] = Math.random() * Math.PI;
+      shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
+      shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
+      shifts[ptr * 4 + 3] = Math.random() * 0.9 + 0.1;
+      ptr++;
+    }
 
-// Manifold Constraint Layer (The topological boundary)
-function ManifoldConstraintLayer() {
-  const meshRef = useRef();
+    // Outer Shell (Toroidal distribution)
+    for (let i = 0; i < PARTICLE_COUNT_OUTER; i++) {
+      const r = 10; 
+      const R = 40;
+      const rand = Math.pow(Math.random(), 1.5);
+      const radius = Math.sqrt(R * R * rand + (1 - rand) * r * r);
+      const theta = Math.random() * 2 * Math.PI;
+      const y = (Math.random() - 0.5) * 2;
 
-  useFrame((state, delta) => {
-    if (meshRef.current) {
-      // Slow rotation for visual fidelity
-      meshRef.current.rotation.y += delta * 0.01;
-      meshRef.current.rotation.x += delta * 0.005;
+      const v = new THREE.Vector3().setFromCylindricalCoords(radius, theta, y);
+      
+      positions[ptr * 3] = v.x;
+      positions[ptr * 3 + 1] = v.y;
+      positions[ptr * 3 + 2] = v.z;
+      
+      sizes[ptr] = Math.random() * 1.5 + 0.5;
+      shifts[ptr * 4] = Math.random() * Math.PI;
+      shifts[ptr * 4 + 1] = Math.random() * Math.PI * 2;
+      shifts[ptr * 4 + 2] = (Math.random() * 0.9 + 0.1) * Math.PI * 0.1;
+      shifts[ptr * 4 + 3] = Math.random() * 0.9 + 0.1;
+      ptr++;
+    }
+
+    return { positions, sizes, shifts };
+  }, []);
+
+  useFrame((state) => {
+    if (mesh.current) {
+      mesh.current.material.uniforms.time.value = state.clock.elapsedTime;
+      mesh.current.rotation.y = state.clock.elapsedTime * 0.05;
+      mesh.current.rotation.z = 0.2; // Tilt the planet
     }
   });
 
   return (
-    <mesh ref={meshRef} position={[0, 0, 0]}>
-      <dodecahedronGeometry args={[5.5, 0]} /> 
-      <meshBasicMaterial 
-        color="#00ffff"
-        wireframe={true} 
+    <points ref={mesh}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" count={positions.length / 3} array={positions} itemSize={3} />
+        <bufferAttribute attach="attributes-sizes" count={sizes.length} array={sizes} itemSize={1} />
+        <bufferAttribute attach="attributes-shift" count={shifts.length / 4} array={shifts} itemSize={4} />
+      </bufferGeometry>
+      <shaderMaterial
+        uniforms={{ time: { value: 0 } }}
+        vertexShader={ParticleShaderMaterial.vertexShader}
+        fragmentShader={ParticleShaderMaterial.fragmentShader}
         transparent={true}
-        opacity={0.15}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
       />
-    </mesh>
+    </points>
   );
 }
 
-// 1. The GΛLYPH NODE Component
-function GlyphNode({ position, color, name, onClick }) {
+// --- AXIOMATIC NODE COMPONENT (Visual Satellites) ---
+function GlyphNode({ id, position, color, name, onSelect }) {
   const meshRef = useRef()
-  const texture = useMemo(() => createTextTexture(name, color), [name, color]);
   
   useFrame((state, delta) => {
     if (meshRef.current) {
-      // Faster, pulsing rotation
       meshRef.current.rotation.x += delta * 0.2
       meshRef.current.rotation.y += delta * 0.1
     }
   })
 
+  const handleClick = useCallback((e) => {
+    e.stopPropagation();
+    onSelect(id);
+  }, [id, onSelect]);
+
   return (
-    <group position={position} onClick={onClick}>
-      {/* Icosahedron Mesh - The Glyptic Core */}
+    <group position={position} onClick={handleClick}>
+      {/* The Physical Node */}
       <mesh ref={meshRef}>
-        <icosahedronGeometry args={[0.4, 0]} /> 
-        <meshBasicMaterial color={color} wireframe />
+        <icosahedronGeometry args={[0.6, 0]} /> 
+        <meshBasicMaterial color={color} wireframe thickness={0.1} />
       </mesh>
       
-      {/* Text Mesh using Canvas Texture - The Identity Layer */}
-      <mesh position={[0, 0.8, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[5.0, 0.8]} /> 
-        <meshBasicMaterial map={texture} transparent />
+      {/* Glow Halo */}
+      <mesh>
+        <sphereGeometry args={[0.65, 16, 16]} />
+        <meshBasicMaterial color={color} transparent opacity={0.1} />
       </mesh>
+
+      {/* Label (Always facing camera) */}
+      <group position={[0, 0.9, 0]}>
+         <Text
+            fontSize={0.3}
+            color="white"
+            anchorX="center"
+            anchorY="middle"
+            outlineWidth={0.02}
+            outlineColor="black"
+          >
+            {name}
+          </Text>
+      </group>
     </group>
   )
 }
 
-// 2. Background Click Handler for Spawning (HIL Input)
-function BackgroundSpawner({ onSpawn }) {
-  const handleClick = useCallback((e) => {
-    e.stopPropagation() 
-    if (e.point) {
-      // Round the coordinates for cleaner Firestore data
-      const pos = e.point.toArray().map(v => parseFloat(v.toFixed(2))); 
-      onSpawn(pos);
-    }
-  }, [onSpawn])
-
-  return (
-    // Invisible plane spanning the view to capture clicks
-    <mesh onClick={handleClick}>
-      <planeGeometry args={[200, 200]} /> 
-      <meshBasicMaterial visible={false} />
-    </mesh>
-  )
-}
-
-// 3. Main Application 
+// --- MAIN APP ---
 export default function App() {
-  const [nodes, setNodes] = useState([])
-  const [constraints, setConstraints] = useState([])
-  const [loading, setLoading] = useState(true);
-  const [authReady, setAuthReady] = useState(false);
-  const [db, setDb] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [ragIndex, setRagIndex] = useState(0);
-
-  // Derive readiness state for the button
-  const isReady = db && userId && !loading;
-
-  // --- 1. FIREBASE INITIALIZATION AND AUTH ---
-  useEffect(() => {
-    let authListener;
-    try {
-      const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-      if (Object.keys(firebaseConfig).length === 0) {
-        console.error("Firebase config is missing. Displaying initial state, persistence disabled.");
-        setLoading(false);
-        setNodes(INITIAL_SYSTEM_STATE.nodes);
-        setConstraints(INITIAL_SYSTEM_STATE.constraints);
-        return;
-      }
-      
-      const app = initializeApp(firebaseConfig);
-      const firestore = getFirestore(app);
-      const auth = getAuth(app);
-
-      setDb(firestore);
-
-      const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-      
-      // Handle authentication state change
-      const handleAuth = (user) => {
-        if (user) {
-          setUserId(user.uid);
-          console.log("Authenticated with UID:", user.uid);
-        } else {
-          // If no user is signed in, sign in anonymously
-          signInAnonymously(auth).then(anonUser => {
-            setUserId(anonUser.user.uid);
-            console.log("Signed in anonymously with UID:", anonUser.user.uid);
-          }).catch(e => {
-            console.error("Anonymous sign-in failed:", e);
-          });
-        }
-        setAuthReady(true);
-      };
-
-      authListener = onAuthStateChanged(auth, handleAuth);
-
-      // Attempt custom token sign-in first if token exists
-      if (token) {
-        signInWithCustomToken(auth, token).catch(e => {
-          // If custom token fails, onAuthStateChanged fallback will handle it
-          console.error("Custom token sign-in failed. Falling back to onAuthStateChanged.", e);
-        });
-      }
-
-    } catch (e) {
-      console.error("Firebase setup failed:", e);
-      setLoading(false);
-    }
-    
-    // Cleanup the auth listener on unmount
-    return () => {
-      if (authListener) authListener();
-    };
-  }, []);
-
-  // --- 2. FIRESTORE DATA LISTENER AND INITIALIZER ---
-  useEffect(() => {
-    // Only proceed if DB object is initialized and Auth state has been checked
-    if (!db || !authReady) return;
-
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-    // Use the PUBLIC data path
-    const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
-    const docRef = doc(db, docPath);
-
-    // Function to set initial state if document doesn't exist
-    const initializeState = async () => {
-        try {
-            await setDoc(docRef, INITIAL_SYSTEM_STATE, { merge: false });
-            console.log("Initialized Axiomatic State in Firestore.");
-        } catch (e) {
-            console.error("Error setting initial state:", e);
-        }
-    };
-
-    const unsubscribe = onSnapshot(docRef, (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        const data = docSnapshot.data();
-        setNodes(data.nodes || []);
-        setConstraints(data.constraints || []);
-        console.log(`Snapshot received. Nodes: ${data.nodes?.length}, Constraints: ${data.constraints?.length}`);
-      } else {
-        // Document doesn't exist, initialize it:
-        // 1. Set local state immediately for visual feedback (THE FIX)
-        setNodes(INITIAL_SYSTEM_STATE.nodes);
-        setConstraints(INITIAL_SYSTEM_STATE.constraints);
-        
-        // 2. Initialize the document in Firestore
-        initializeState(); 
-        
-        console.log("Document missing. Initializing local state and writing to Firestore.");
-      }
-      // Data is either successfully retrieved or initialization is triggered, so stop loading
-      setLoading(false); 
-    }, (error) => {
-      console.error("Firestore snapshot failed:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [db, authReady]);
+  const [nodes, setNodes] = useState(INITIAL_SYSTEM_STATE.nodes)
+  const [constraints, setConstraints] = useState(INITIAL_SYSTEM_STATE.constraints)
   
-  
-  // --- RAG INGESTION HANDLER (Adds next artifact from the predefined list) ---
-  const handleRAGIngestion = useCallback(async () => {
-    // Guard clause to prevent execution before setup is complete
-    if (!isReady) {
-        console.warn("System not ready for RAG ingestion. Waiting for DB/Auth lock.");
-        return; 
-    }
+  // Simple Node Selection for HIL verification
+  const handleNodeSelect = (id) => {
+    console.log("Axiomatic Node Selected:", id);
+    // Placeholder for opening the RAG Terminal for this node
+  }
 
-    const artifact = RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length];
-    
-    // Create new node object
-    const newNode = {
-      id: artifact.name.replace(/\s/g, '-').toLowerCase(),
-      name: artifact.name,
-      color: artifact.color,
-      // Use the predefined position from the RAG_ARTIFACTS list
-      position: artifact.pos, 
-      type: artifact.type,
-      timestamp: Date.now()
-    };
-
-    // Create new constraint objects linking to the Axiomatic foundations
-    const newConstraints = artifact.links.map(linkId => ([
-      newNode.id, linkId, newNode.color 
-    ]));
-
-    // Update Firestore
-    try {
-      const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-      const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
-      const docRef = doc(db, docPath);
-
-      // Ensure no duplicate nodes are added (by ID), then append the new node.
-      const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
-      // Append new constraints
-      const allConstraints = [...constraints, ...newConstraints];
-
-      await setDoc(docRef, {
-        nodes: uniqueNodes,
-        constraints: allConstraints
-      }, { merge: false }); // Overwrite the arrays completely with the new set
-
-      setRagIndex(i => i + 1);
-      console.log(`Ingested new RAG artifact: ${newNode.name}`);
-    } catch (e) {
-      console.error("Error injecting RAG artifact:", e);
-    }
-  }, [db, userId, nodes, constraints, isReady, ragIndex]);
-
-
-  // HIL Input Handler (Spawning new nodes via user click)
-  const handleSpawn = useCallback(async (pos) => {
-    if (!isReady) return;
-    
-    const newId = `hil-input-${Date.now()}`
-    const newNode = { 
-      id: newId, 
-      name: `HIL Input ${nodes.length + 1}`,
-      color: 'white', 
-      position: pos,
-      type: 'HIL-Input',
-      timestamp: Date.now()
-    }
-    
-    // Link new node to a random existing axiomatic node (rag-orch, glyph-eng, vgm-anchor, manifold, hax)
-    const axiomaticIds = INITIAL_SYSTEM_STATE.nodes.map(n => n.id);
-    const existingNodeId = axiomaticIds[Math.floor(Math.random() * axiomaticIds.length)];
-    const newConstraint = [newId, existingNodeId, 'white']; 
-
-    // Update Firestore via setDoc to trigger snapshot listener
-    try {
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const docPath = `artifacts/${appId}/public/data/system_state/axiomatic_state`;
-        const docRef = doc(db, docPath);
-
-        const uniqueNodes = [...nodes.filter(n => n.id !== newNode.id), newNode];
-
-        await setDoc(docRef, {
-            nodes: uniqueNodes,
-            constraints: [...constraints, newConstraint]
-        }, { merge: false });
-
-        console.log(`Spawned new HIL Input node: ${newNode.name}`);
-
-    } catch (e) {
-        console.error("Error spawning node:", e);
-    }
-  }, [db, userId, nodes, constraints, isReady]);
-
-
-  // Utility to find node position by ID
-  const nodeMap = useMemo(() => {
-    // Map node ID to its position vector [x, y, z]
-    return new Map(nodes.map(node => [node.id, node.position]));
-  }, [nodes]);
-
-  // Generate line points from node constraints
+  // Map positions for lines
   const linePoints = useMemo(() => {
+    const nodeMap = new Map(nodes.map(n => [n.id, n.position]));
     const points = [];
-    constraints.forEach(([startId, endId, color]) => {
-      const startPos = nodeMap.get(startId);
-      const endPos = nodeMap.get(endId);
-      if (startPos && endPos) {
-        points.push({
-          points: [new THREE.Vector3(...startPos), new THREE.Vector3(...endPos)],
-          color: color
+    constraints.forEach(([start, end, color]) => {
+      if(nodeMap.has(start) && nodeMap.has(end)) {
+        points.push({ 
+          start: new THREE.Vector3(...nodeMap.get(start)), 
+          end: new THREE.Vector3(...nodeMap.get(end)),
+          color 
         });
       }
     });
     return points;
-  }, [constraints, nodeMap]);
-
-  if (loading) {
-    return (
-      <div 
-        className="w-screen bg-gray-950 flex items-center justify-center text-lime-400 font-mono" 
-        style={{ height: '100dvh' }}
-      >
-        <p>Axiomatic Core Bootstrapping... (Authenticating/Loading Data Grid)</p>
-      </div>
-    );
-  }
+  }, [nodes, constraints]);
 
   return (
-    <div 
-      className="w-screen bg-gray-950" 
-      style={{ height: '100dvh' }} 
-    > 
-      {/* CEX View: 2D Control Surface Overlay (Axiomatic Metrics Display) */}
-      <div 
-        className="absolute top-5 left-5 z-10 p-3 rounded-xl"
-        style={{
-          color: 'lime',
-          fontFamily: 'monospace',
-          background: 'rgba(0, 0, 0, 0.5)',
-          fontSize: '14px',
-          boxShadow: '0 0 10px rgba(50, 255, 50, 0.5)'
-        }}
-      >
-        CAPSULE OS | **DEX View** Operational
-        <br/>User ID: <span className="text-yellow-400 break-words">{userId || "N/A"}</span>
-        <br/>Nodes (Glyphs): {nodes.length} | Constraints (Wires): {constraints.length}
-        <br/>Status: {isReady ? 'Persistent Grid Locked' : <span className="text-red-400">Syncing...</span>}
+    <div className="w-screen h-screen bg-black">
+      {/* CEX View: HUD Overlay */}
+      <div style={{
+        position: 'absolute', top: 20, left: 20, zIndex: 10,
+        color: 'cyan', fontFamily: 'monospace', pointerEvents: 'none',
+        textShadow: '0 0 10px cyan'
+      }}>
+        CAPSULE OS | **DEX View** <br/>
+        Structural Fidelity: 99.2% <br/>
+        Manifold: LOCKED
       </div>
 
-      {/* RAG Injection Control Panel (Bottom Right) */}
-      <div 
-        className="absolute bottom-5 right-5 z-10 p-4 rounded-xl flex flex-col items-end"
-        style={{
-          color: 'cyan',
-          fontFamily: 'monospace',
-          background: 'rgba(0, 0, 0, 0.6)',
-          boxShadow: '0 0 15px rgba(0, 255, 255, 0.6)'
-        }}
-      >
-        <p className="text-sm mb-2 text-lime-300">RAG Pipeline Control (Simulate Ingestion)</p>
-        <button 
-          onClick={handleRAGIngestion}
-          disabled={!isReady} // Disable button until ready
-          className={`px-4 py-2 transition duration-150 rounded-full text-white font-bold text-lg shadow-xl ${
-            isReady 
-              ? 'bg-indigo-700 hover:bg-indigo-600' 
-              : 'bg-gray-500 cursor-not-allowed'
-          }`}
-          style={{ 
-            boxShadow: isReady 
-              ? '0 0 10px rgba(120, 100, 255, 0.8), inset 0 0 5px rgba(255, 255, 255, 0.5)'
-              : 'none',
-            border: isReady ? '2px solid #a5b4fc' : 'none',
-          }}
-        >
-          {isReady ? 'Inject Next RAG Artifact' : 'Connecting...'}
-        </button>
-        <p className="text-xs mt-2 text-gray-400">
-          {ragIndex < RAG_ARTIFACTS.length ? `Artifact #${ragIndex + 1}: ${RAG_ARTIFACTS[ragIndex % RAG_ARTIFACTS.length].name}` : 'All initial RAG artifacts injected.'}
-        </p>
-      </div>
-
-
-      {/* DEX View: 3D Computational Graph */}
-      <Canvas 
-        className="w-full h-full"
-        style={{ display: 'block' }} 
-        camera={{ position: [0, 0, 10], near: 0.1, far: 100 }} 
-      >
-        {/* Allows user to pan and rotate the view */}
+      {/* DEX View: 3D Graph */}
+      <Canvas camera={{ position: [0, 0, 18], fov: 45 }}>
         <OrbitControls 
           enableDamping 
           dampingFactor={0.05} 
-          minDistance={5} 
-          maxDistance={30} 
-          touches={{
-            ONE: THREE.TOUCH.ROTATE,
-            TWO: THREE.TOUCH.DOLLY,
-            THREE: THREE.TOUCH.PAN,
-          }}
+          minDistance={10} 
+          maxDistance={50} 
         />
         
-        {/* Holographic Lighting */}
-        <ambientLight intensity={0.5} color="cyan" />
-        <pointLight position={[10, 10, 10]} intensity={1} color="lime" />
-        <pointLight position={[-10, -10, -10]} intensity={0.5} color="orange" />
+        {/* The Fusion Particle System (The Manifold) */}
+        <ParticlePlanet />
 
-        {/* --- Manifold Constraint Layer (Boundary) --- */}
-        <ManifoldConstraintLayer />
-
-        {/* Render all GΛLYPH Nodes (Axiomatic and RAG-Derived) */}
+        {/* Axiomatic Nodes (Satellites) */}
         {nodes.map(node => (
           <GlyphNode 
-            key={node.id} 
-            position={node.position} 
-            color={node.color} 
-            name={node.name}
-            onClick={() => console.log(`Node ${node.name} activated. HIL interaction log.`)}
+            key={node.id}
+            {...node}
+            onSelect={handleNodeSelect}
           />
         ))}
 
-        {/* Render Lattice Constraints (Wires) */}
-        {linePoints.map(({ points, color }, index) => (
-          <Line
-            key={index}
-            points={points}
-            color={color} 
-            lineWidth={2}
-            dashed={false}
+        {/* Lattice Constraints (Wires) */}
+        {linePoints.map((l, i) => (
+          <Line 
+            key={i} 
+            points={[l.start, l.end]} 
+            color={l.color} 
+            lineWidth={1} 
+            transparent 
+            opacity={0.6} 
           />
         ))}
-        
-        {/* HIL Input Spawner (Click on background to spawn a new HIL node) */}
-        <BackgroundSpawner onSpawn={handleSpawn} />
-
       </Canvas>
     </div>
   )
