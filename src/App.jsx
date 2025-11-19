@@ -9,7 +9,7 @@ const PARTICLE_COUNT_OUTER = 35000;
 const MAX_GALAXY_RADIUS = 45; // Galaxy width is 90 units
 const CAMERA_FOV = 60;
 
-// --- AXIOMATIC DATA (Positions remain the same) ---
+// --- AXIOMATIC DATA (Positions remain the same, visual scale increases below) ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
     { id: 'rag-orch', name: 'Multi-Agent RAG', color: '#00ffff', position: [3.5, 1.0, 0] },
@@ -27,46 +27,36 @@ const INITIAL_SYSTEM_STATE = {
   ],
 };
 
-// --- RESPONSIVE CAMERA CONTROLLER ---
+// --- RESPONSIVE CAMERA CONTROLLER (The key fix) ---
 function ResponsiveCamera() {
   const { camera, size } = useThree();
   const tanHalfFOV = useMemo(() => Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2)), []);
-  const controlsRef = useRef();
-
+  
   useEffect(() => {
     const aspect = size.width / size.height;
     const objectWidth = MAX_GALAXY_RADIUS * 2; // 90 units
 
+    // Calculate Z required to fit the 90-unit-wide galaxy into the viewport's current width.
+    // This prevents clipping in portrait mode.
+    // Z = ObjectWidth / (2 * tan(FOV/2) * Aspect)
     const requiredZ = objectWidth / (2 * tanHalfFOV * aspect); 
     
+    // Set final Z with a small 5% padding to ensure the whole object is visible.
     let finalZ = requiredZ * 1.05;
     
+    // Clamp to reasonable boundaries
     finalZ = Math.min(Math.max(finalZ, 20), 200); 
 
+    // Use a fixed Z for landscape, as the calculated Z often results in too far a distance.
     if (aspect > 1.2) {
-      finalZ = 25; // Closer view for landscape
+      finalZ = 25;
     }
 
     camera.position.set(0, 2, finalZ); 
     camera.updateProjectionMatrix();
-
-    // Update controls target on resize to ensure centering
-    if (controlsRef.current) {
-      controlsRef.current.target.set(0, 0, 0);
-      controlsRef.current.update();
-    }
   }, [size, camera, tanHalfFOV]);
 
-  return (
-    <OrbitControls 
-      ref={controlsRef}
-      enableDamping 
-      dampingFactor={0.05} 
-      minDistance={5} 
-      maxDistance={200}
-      enablePan={false}
-    />
-  );
+  return null;
 }
 
 // --- PARTICLE SHADER (remains the same) ---
@@ -77,6 +67,7 @@ const ParticleShaderMaterial = {
     attribute vec4 shift;
     varying vec3 vColor;
     void main() {
+      // ... (Shader code) ...
       vec3 color1 = vec3(227., 155., 0.) / 255.; 
       vec3 color2 = vec3(100., 50., 255.) / 255.; 
       
@@ -105,11 +96,12 @@ const ParticleShaderMaterial = {
   `
 };
 
-// --- FUSION PARTICLE PLANET (remains the same) ---
+// --- FUSION PARTICLE PLANET ---
 function ParticlePlanet() {
   const mesh = useRef();
   
   const { positions, sizes, shifts } = useMemo(() => {
+    // (Geometry generation code - uses MAX_GALAXY_RADIUS)
     const particles = PARTICLE_COUNT_INNER + PARTICLE_COUNT_OUTER;
     const positions = new Float32Array(particles * 3);
     const sizes = new Float32Array(particles);
@@ -189,28 +181,10 @@ function ParticlePlanet() {
   );
 }
 
-// --- AXIOMATIC NODE (Dynamically scaled) ---
+// --- AXIOMATIC NODE (Scaled up for visibility) ---
 function GlyphNode({ id, position, color, name, onSelect }) {
-  const meshRef = useRef();
-  // Get camera access
-  const { camera } = useThree();
-
-  // --- Dynamic Scaling Logic ---
-  // The camera is at Z=25 in landscape, and Z~160 in portrait (ratio ~6.4).
-  // To maintain the visual size, we need to divide the geometric size by the distance ratio.
-  const referenceZ = 25; // Base distance for target visual size
-  const targetVisualRadius = 3.0;
-  const targetVisualLabelSize = 1.5;
-
-  // Calculate the ratio of the current distance to the reference distance
-  // Use Math.max(25) to prevent division by zero or extreme scaling if controls zoom in
-  const currentDistanceRatio = Math.max(camera.position.z, 25) / referenceZ; 
+  const meshRef = useRef()
   
-  // Calculate the actual geometric size needed to appear constant
-  const nodeScale = targetVisualRadius / currentDistanceRatio;
-  const labelScale = targetVisualLabelSize / currentDistanceRatio;
-
-  // --- Animation and Click ---
   useFrame((state, delta) => {
     if (meshRef.current) {
       meshRef.current.rotation.x += delta * 0.2
@@ -223,24 +197,20 @@ function GlyphNode({ id, position, color, name, onSelect }) {
     onSelect(id);
   }, [id, onSelect]);
 
+  // SCALING NODES: Increased size from ~0.8 to 3.0 to be visible from Z=160
+  const nodeScale = 3.0;
+  const labelScale = 1.5;
+
   return (
-    // Clickable group
     <group position={position} onClick={handleClick}>
-      
-      {/* 1. Wireframe Icosahedron */}
       <mesh ref={meshRef}>
         <icosahedronGeometry args={[nodeScale, 0]} /> 
         <meshBasicMaterial color={color} wireframe thickness={0.15} />
       </mesh>
-      
-      {/* 2. Transparent Sphere (The actual easy-to-click target) */}
       <mesh>
         <sphereGeometry args={[nodeScale + 0.1, 16, 16]} />
-        {/* The object opacity is 0.0, making it invisible but fully clickable */}
-        <meshBasicMaterial color={color} transparent opacity={0.0} /> 
+        <meshBasicMaterial color={color} transparent opacity={0.15} />
       </mesh>
-      
-      {/* 3. Text Label (Fixed position relative to node scale) */}
       <group position={[0, nodeScale + 0.3, 0]}>
          <Text
             fontSize={labelScale}
@@ -249,8 +219,6 @@ function GlyphNode({ id, position, color, name, onSelect }) {
             anchorY="middle"
             outlineWidth={0.03}
             outlineColor="black"
-            // FIX: depthTest=false ensures text always renders on top of the mesh
-            depthTest={false} 
           >
             {name}
           </Text>
@@ -261,12 +229,11 @@ function GlyphNode({ id, position, color, name, onSelect }) {
 
 // --- MAIN APP ---
 export default function App() {
-  const [nodes] = useState(INITIAL_SYSTEM_STATE.nodes)
-  const [constraints] = useState(INITIAL_SYSTEM_STATE.constraints)
+  const [nodes, setNodes] = useState(INITIAL_SYSTEM_STATE.nodes)
+  const [constraints, setConstraints] = useState(INITIAL_SYSTEM_STATE.constraints)
   
   const handleNodeSelect = (id) => {
     console.log("Node Selected:", id);
-    // Add haptic feedback here later
   }
 
   const linePoints = useMemo(() => {
@@ -285,19 +252,7 @@ export default function App() {
   }, [nodes, constraints]);
 
   return (
-    // CSS is final and locks the screen height
-    <div 
-      style={{ 
-        position: 'fixed', 
-        inset: 0, 
-        width: '100vw', 
-        height: '100vh',
-        height: '100lvh',
-        height: '100svh', 
-        cursor: 'pointer' // Add a subtle cursor hint
-      }} 
-      className="bg-black overflow-hidden touch-none"
-    >
+    <div className="fixed inset-0 w-full h-[100dvh] bg-black overflow-hidden touch-none">
       {/* HUD */}
       <div style={{
         position: 'absolute', top: 20, left: 20, zIndex: 10,
@@ -311,6 +266,13 @@ export default function App() {
 
       <Canvas dpr={[1, 2]} camera={{ fov: CAMERA_FOV }}>
         <ResponsiveCamera />
+        <OrbitControls 
+          enableDamping 
+          dampingFactor={0.05} 
+          minDistance={5} 
+          maxDistance={200} // Increased max distance
+          enablePan={false}
+        />
         
         <ParticlePlanet />
 
@@ -322,7 +284,7 @@ export default function App() {
           />
         ))}
 
-        {/* Line width also needs to scale visually, but we will leave it fixed for stability. */}
+        {/* SCALING LINES: Increased line width to 4.0 */}
         {linePoints.map((l, i) => (
           <Line 
             key={i} 
