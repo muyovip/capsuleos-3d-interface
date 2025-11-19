@@ -9,7 +9,7 @@ const PARTICLE_COUNT_OUTER = 35000;
 const MAX_GALAXY_RADIUS = 45; // Galaxy width is 90 units
 const CAMERA_FOV = 60;
 
-// --- AXIOMATIC DATA (Positions remain the same, visual scale increases below) ---
+// --- AXIOMATIC DATA (Positions remain the same) ---
 const INITIAL_SYSTEM_STATE = {
   nodes: [
     { id: 'rag-orch', name: 'Multi-Agent RAG', color: '#00ffff', position: [3.5, 1.0, 0] },
@@ -27,16 +27,16 @@ const INITIAL_SYSTEM_STATE = {
   ],
 };
 
-// --- RESPONSIVE CAMERA CONTROLLER (The key fix) ---
+// --- RESPONSIVE CAMERA CONTROLLER ---
 function ResponsiveCamera() {
   const { camera, size } = useThree();
   const tanHalfFOV = useMemo(() => Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2)), []);
-  
+  const controlsRef = useRef();
+
   useEffect(() => {
     const aspect = size.width / size.height;
     const objectWidth = MAX_GALAXY_RADIUS * 2; // 90 units
 
-    // Z = ObjectWidth / (2 * tan(FOV/2) * Aspect)
     const requiredZ = objectWidth / (2 * tanHalfFOV * aspect); 
     
     let finalZ = requiredZ * 1.05;
@@ -44,14 +44,29 @@ function ResponsiveCamera() {
     finalZ = Math.min(Math.max(finalZ, 20), 200); 
 
     if (aspect > 1.2) {
-      finalZ = 25;
+      finalZ = 25; // Closer view for landscape
     }
 
     camera.position.set(0, 2, finalZ); 
     camera.updateProjectionMatrix();
+
+    // Update controls target on resize to ensure centering
+    if (controlsRef.current) {
+      controlsRef.current.target.set(0, 0, 0);
+      controlsRef.current.update();
+    }
   }, [size, camera, tanHalfFOV]);
 
-  return null;
+  return (
+    <OrbitControls 
+      ref={controlsRef}
+      enableDamping 
+      dampingFactor={0.05} 
+      minDistance={5} 
+      maxDistance={200}
+      enablePan={false}
+    />
+  );
 }
 
 // --- PARTICLE SHADER (remains the same) ---
@@ -90,7 +105,7 @@ const ParticleShaderMaterial = {
   `
 };
 
-// --- FUSION PARTICLE PLANET ---
+// --- FUSION PARTICLE PLANET (remains the same) ---
 function ParticlePlanet() {
   const mesh = useRef();
   
@@ -174,10 +189,28 @@ function ParticlePlanet() {
   );
 }
 
-// --- AXIOMATIC NODE (Scaled up for visibility) ---
+// --- AXIOMATIC NODE (Dynamically scaled) ---
 function GlyphNode({ id, position, color, name, onSelect }) {
-  const meshRef = useRef()
+  const meshRef = useRef();
+  // Get camera access
+  const { camera } = useThree();
+
+  // --- Dynamic Scaling Logic ---
+  // The camera is at Z=25 in landscape, and Z~160 in portrait (ratio ~6.4).
+  // To maintain the visual size, we need to divide the geometric size by the distance ratio.
+  const referenceZ = 25; // Base distance for target visual size
+  const targetVisualRadius = 3.0;
+  const targetVisualLabelSize = 1.5;
+
+  // Calculate the ratio of the current distance to the reference distance
+  // Use Math.max(25) to prevent division by zero or extreme scaling if controls zoom in
+  const currentDistanceRatio = Math.max(camera.position.z, 25) / referenceZ; 
   
+  // Calculate the actual geometric size needed to appear constant
+  const nodeScale = targetVisualRadius / currentDistanceRatio;
+  const labelScale = targetVisualLabelSize / currentDistanceRatio;
+
+  // --- Animation and Click ---
   useFrame((state, delta) => {
     if (meshRef.current) {
       meshRef.current.rotation.x += delta * 0.2
@@ -190,19 +223,24 @@ function GlyphNode({ id, position, color, name, onSelect }) {
     onSelect(id);
   }, [id, onSelect]);
 
-  const nodeScale = 3.0;
-  const labelScale = 1.5;
-
   return (
+    // Clickable group
     <group position={position} onClick={handleClick}>
+      
+      {/* 1. Wireframe Icosahedron */}
       <mesh ref={meshRef}>
         <icosahedronGeometry args={[nodeScale, 0]} /> 
         <meshBasicMaterial color={color} wireframe thickness={0.15} />
       </mesh>
+      
+      {/* 2. Transparent Sphere (The actual easy-to-click target) */}
       <mesh>
         <sphereGeometry args={[nodeScale + 0.1, 16, 16]} />
-        <meshBasicMaterial color={color} transparent opacity={0.15} />
+        {/* The object opacity is 0.0, making it invisible but fully clickable */}
+        <meshBasicMaterial color={color} transparent opacity={0.0} /> 
       </mesh>
+      
+      {/* 3. Text Label (Fixed position relative to node scale) */}
       <group position={[0, nodeScale + 0.3, 0]}>
          <Text
             fontSize={labelScale}
@@ -211,6 +249,8 @@ function GlyphNode({ id, position, color, name, onSelect }) {
             anchorY="middle"
             outlineWidth={0.03}
             outlineColor="black"
+            // FIX: depthTest=false ensures text always renders on top of the mesh
+            depthTest={false} 
           >
             {name}
           </Text>
@@ -226,6 +266,7 @@ export default function App() {
   
   const handleNodeSelect = (id) => {
     console.log("Node Selected:", id);
+    // Add haptic feedback here later
   }
 
   const linePoints = useMemo(() => {
@@ -244,7 +285,7 @@ export default function App() {
   }, [nodes, constraints]);
 
   return (
-    // FINAL CSS FIX: Uses layered viewport units (svh, lvh) for gap-free iPhone full screen
+    // CSS is final and locks the screen height
     <div 
       style={{ 
         position: 'fixed', 
@@ -252,7 +293,8 @@ export default function App() {
         width: '100vw', 
         height: '100vh',
         height: '100lvh',
-        height: '100svh', // This unit should correctly lock the screen height on iOS/Safari.
+        height: '100svh', 
+        cursor: 'pointer' // Add a subtle cursor hint
       }} 
       className="bg-black overflow-hidden touch-none"
     >
@@ -269,13 +311,6 @@ export default function App() {
 
       <Canvas dpr={[1, 2]} camera={{ fov: CAMERA_FOV }}>
         <ResponsiveCamera />
-        <OrbitControls 
-          enableDamping 
-          dampingFactor={0.05} 
-          minDistance={5} 
-          maxDistance={200}
-          enablePan={false}
-        />
         
         <ParticlePlanet />
 
@@ -287,6 +322,7 @@ export default function App() {
           />
         ))}
 
+        {/* Line width also needs to scale visually, but we will leave it fixed for stability. */}
         {linePoints.map((l, i) => (
           <Line 
             key={i} 
