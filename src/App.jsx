@@ -8,8 +8,15 @@ const PARTICLE_COUNT_INNER = 15000;
 const PARTICLE_COUNT_OUTER = 35000;
 const MAX_GALAXY_RADIUS = 45; // Galaxy width is 90 units
 const CAMERA_FOV = 60;
-const LANDSCAPE_Z = 25; // Base distance for landscape
-const PORTRAIT_Z = 160; // Estimated distance for portrait
+
+// Base camera distances used by ResponsiveCamera
+const LANDSCAPE_Z = 25; 
+const PORTRAIT_Z = 160; 
+
+// Base size multiplier. Nodes will be scaled from this base.
+const BASE_NODE_RADIUS = 3.0;
+const BASE_LABEL_SIZE = 1.5;
+const BASE_LINE_WIDTH = 4.0;
 
 // --- AXIOMATIC DATA (Remains the same) ---
 const INITIAL_SYSTEM_STATE = {
@@ -30,8 +37,6 @@ const INITIAL_SYSTEM_STATE = {
 };
 
 // --- CAMERA CONTROLLER & SIZE STATE ---
-
-// This component now *only* sets the camera Z and pushes the aspect ratio
 function ResponsiveCamera({ setAspect }) {
   const { camera, size } = useThree();
   const tanHalfFOV = useMemo(() => Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2)), []);
@@ -47,8 +52,12 @@ function ResponsiveCamera({ setAspect }) {
     finalZ = Math.min(Math.max(finalZ, 20), 200); 
 
     if (aspect > 1.2) {
-      finalZ = LANDSCAPE_Z; // Landscape: Z=25
+      finalZ = LANDSCAPE_Z; 
+    } else {
+        // Ensure it uses the defined portrait Z if aspect ratio logic dictates a much smaller Z
+        finalZ = Math.max(finalZ, PORTRAIT_Z * 0.9);
     }
+
 
     camera.position.set(0, 2, finalZ); 
     camera.updateProjectionMatrix();
@@ -77,7 +86,6 @@ function ResponsiveCamera({ setAspect }) {
 
 // --- PARTICLE SHADER (remains the same) ---
 const ParticleShaderMaterial = {
-  // ... (Shader code is omitted for brevity, but it is unchanged) ...
   vertexShader: `
     uniform float time;
     attribute float sizes;
@@ -114,7 +122,6 @@ const ParticleShaderMaterial = {
 
 // --- FUSION PARTICLE PLANET (remains the same) ---
 function ParticlePlanet() {
-    // ... (ParticlePlanet component code is omitted for brevity, but it is unchanged) ...
     const mesh = useRef();
   
     const { positions, sizes, shifts } = useMemo(() => {
@@ -151,7 +158,7 @@ function ParticlePlanet() {
           const radius = Math.sqrt(R * R * rand + (1 - rand) * r * r);
           const theta = Math.random() * 2 * Math.PI;
           const y = (Math.random() - 0.5) * 12.0; 
-    
+
           const v = new THREE.Vector3().setFromCylindricalCoords(radius, theta, y);
           
           positions[ptr * 3] = v.x;
@@ -202,8 +209,8 @@ function GlyphNode({ id, position, color, name, onSelect, orientationScale }) {
   const meshRef = useRef();
 
   // FIX: Node scale is now fixed based only on the orientationScale prop
-  const nodeScale = 3.0 * orientationScale;
-  const labelScale = 1.5 * orientationScale;
+  const nodeScale = BASE_NODE_RADIUS * orientationScale;
+  const labelScale = BASE_LABEL_SIZE * orientationScale;
 
   // --- Animation and Click (remains the same) ---
   useFrame((state, delta) => {
@@ -279,18 +286,17 @@ export default function App() {
   }, [nodes, constraints]);
 
   // FIX: Calculate the scale factor based on orientation (aspect ratio) only.
-  // We use the ratio of Portrait Z / Landscape Z (~6.4) to scale the nodes down in portrait mode.
   const Z_RATIO = PORTRAIT_Z / LANDSCAPE_Z; // ~6.4
   
-  // If aspect ratio is less than 1.2 (Portrait mode), scale nodes DOWN.
-  // Otherwise (Landscape mode), use a scale of 1 (no scaling).
-  const orientationScale = aspect < 1.2 ? 1 / Z_RATIO : 1; 
+  // Base scale is 1.0, intended for the portrait view (furthest away)
+  let orientationScale = 1.0; 
   
-  // Base line width (at Landscape Z)
-  const baseLineWidth = 4.0; 
-  // Apply the same orientation scale to the lines.
-  const dynamicLineWidth = baseLineWidth * orientationScale;
+  if (aspect > 1.2) {
+    // Landscape mode is Z=25 (closer). Scale DOWN the node size by the Z_RATIO.
+    orientationScale = 1 / Z_RATIO; 
+  }
 
+  const dynamicLineWidth = BASE_LINE_WIDTH * orientationScale;
 
   return (
     <div 
